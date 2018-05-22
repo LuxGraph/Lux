@@ -15,7 +15,7 @@
 
 #include <cstdio>
 #include "../graph.h"
-//#include "PageRank_mapper.h"
+#include "pagerank_mapper.h"
 #include "math.h"
 #include "legion.h"
 #include "queue"
@@ -80,13 +80,13 @@ void top_level_task(const Task *task, const std::vector<PhysicalRegion> &regions
   printf("ELAPSED TIME = %7.7f s\n", sim_time);
 }
 
-static void update_mappers(Machine machine, HighLevelRuntime *rt,
+static void update_mappers(Machine machine, Runtime *rt,
                            const std::set<Processor> &local_procs)
 {
   for (std::set<Processor>::const_iterator it = local_procs.begin();
         it != local_procs.end(); it++)
   {
-    //rt->replace_default_mapper(new BFSMapper(machine, rt, *it), *it);
+    rt->replace_default_mapper(new PageRankMapper(machine, rt, *it), *it);
   }
 }
 
