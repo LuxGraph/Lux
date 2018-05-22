@@ -208,7 +208,6 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
   }
   //double ts_end = Realm::Clock::current_time_in_microseconds();
   //printf("Partitioning time = %.2lfus\n", ts_end - ts_mid);
-  free(raw_rows);
   assert(bounds.size() == (size_t)numParts);
   // First, we partition the vertices
   LegionRuntime::Arrays::Rect<1> color_rect(
@@ -257,6 +256,7 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     in_vtx_lp
       = runtime->get_logical_partition(ctx, in_vtx_lr, col_idx_ip);
   }
+  free(raw_rows);
 }
 
 void load_task_impl(const Task *task,
@@ -266,7 +266,6 @@ void load_task_impl(const Task *task,
   assert(regions.size() == 2);
   assert(task->regions.size() == 2);
   char* file_name = (char*) task->args;
-  log_pr.print("Read file: %s\n", file_name);
   const AccessorWO<E_ID, 1> acc_raw_rows(regions[0], FID_DATA);
   const AccessorWO<V_ID, 1> acc_raw_cols(regions[1], FID_DATA);
   Rect<1> rect_raw_rows = runtime->get_index_space_domain(
@@ -280,6 +279,8 @@ void load_task_impl(const Task *task,
   E_ID* raw_rows = acc_raw_rows.ptr(rect_raw_rows.lo);
   V_ID* raw_cols = acc_raw_cols.ptr(rect_raw_cols.lo);
   // Load row pointers and col indices
+  log_pr.print("Load task: file(%s) rowLeft(%u) rowRight(%u) colLeft(%zu) colRight(%zu)",
+               file_name, rowLeft, rowRight, colLeft, colRight);
   FILE* fd = fopen(file_name, "rb");
   assert(fd != NULL);
   int fseek_ret;
