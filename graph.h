@@ -94,12 +94,10 @@ public:
            std::string &fn);
 };
 
-class ScanTask : public IndexLauncher
+class ScanTask : public TaskLauncher
 {
 public:
-  ScanTask(const Graph &graph,
-           const IndexSpaceT<1> &domain,
-           const ArgumentMap &arg_map);
+  ScanTask(const Graph &graph);
 };
 
 class InitTask : public IndexLauncher

@@ -159,8 +159,8 @@ void init_kernel(V_ID rowLeft, V_ID rowRight, E_ID colLeft,
       row_ptrs[n].degree = degrees[n];
     for (E_ID e = startColIdx; e < endColIdx; e++)
     {
-      col_idxs[e].src = raw_cols[e - colLeft];
-      col_idxs[e].dst = n + rowLeft;
+      col_idxs[e - colLeft].src = raw_cols[e - colLeft];
+      col_idxs[e - colLeft].dst = n + rowLeft;
     }
   }
 }

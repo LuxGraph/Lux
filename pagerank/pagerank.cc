@@ -51,11 +51,15 @@ void top_level_task(const Task *task, const std::vector<PhysicalRegion> &regions
  
   ArgumentMap local_args;
   // Init phase
-  Rect<1> task_rect(Point<1>(0), Point<1>(graph.numParts - 1));
+  Rect<1> task_rect(0, graph.numParts - 1);
   IndexSpaceT<1> task_is = runtime->create_index_space(ctx, task_rect);
   LoadTask load_task(graph, task_is, local_args, filename);
   FutureMap fm = runtime->execute_index_space(ctx, load_task);
   fm.wait_all_results();
+  ScanTask scan_task(graph);
+  Future f = runtime->execute_task(ctx, scan_task);
+  f.get_void_result();
+
   InitTask init_task(graph, task_is, local_args);
   fm = runtime->execute_index_space(ctx, init_task);
   fm.wait_all_results();
@@ -67,6 +71,7 @@ void top_level_task(const Task *task, const std::vector<PhysicalRegion> &regions
  
   // PageRank phase
   int iteration = 0;
+  log_pr.print("Start PageRank computation...");
   double ts_start = Realm::Clock::current_time_in_microseconds(); 
   for (int i = 0; i < numIter; i++)
   {
@@ -77,6 +82,7 @@ void top_level_task(const Task *task, const std::vector<PhysicalRegion> &regions
   fm.wait_all_results();
   double ts_end = Realm::Clock::current_time_in_microseconds();
   double sim_time = 1e-6 * (ts_end - ts_start);
+  log_pr.print("Finish PageRank computation...");
   printf("ELAPSED TIME = %7.7f s\n", sim_time);
 }
 
@@ -165,6 +171,7 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     // Make logical regions
     row_ptr_lr = runtime->create_logical_region(ctx, vtx_is, row_ptr_fs);
     raw_row_lr = runtime->create_logical_region(ctx, vtx_is, raw_row_fs);
+    degree_lr = runtime->create_logical_region(ctx, vtx_is, in_vtx_fs);
     in_vtx_lr = runtime->create_logical_region(ctx, edge_is, in_vtx_fs);
     col_idx_lr = runtime->create_logical_region(ctx, edge_is, col_idx_fs);
     raw_col_lr = runtime->create_logical_region(ctx, edge_is, raw_col_fs);
@@ -227,6 +234,7 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
                                         pvt_vtx_coloring, true);
     row_ptr_lp = runtime->get_logical_partition(ctx, row_ptr_lr, vtx_ip);
     raw_row_lp = runtime->get_logical_partition(ctx, raw_row_lr, vtx_ip);
+    degree_lp = runtime->get_logical_partition(ctx, degree_lr, vtx_ip);
     for (int i = 0; i < 2; i++)
     {
       dist_lp[i] = runtime->get_logical_partition(ctx, dist_lr[i], vtx_ip);
@@ -351,21 +359,19 @@ LoadTask::LoadTask(const Graph &graph,
   }
 }
 
-ScanTask::ScanTask(const Graph &graph,
-                   const IndexSpaceT<1> &domain,
-                   const ArgumentMap &arg_map)
-  : IndexLauncher(SCAN_TASK_ID, domain, TaskArgument(NULL, 0), arg_map)
+ScanTask::ScanTask(const Graph &graph)
+  : TaskLauncher(SCAN_TASK_ID, TaskArgument(NULL, 0))
 {
   // regions[0]: degrees
   {
-    RegionRequirement rr(graph.degree_lp, 0/*projection id*/,
+    RegionRequirement rr(graph.degree_lr, 0/*projection id*/,
                          WRITE_ONLY, EXCLUSIVE, graph.degree_lr);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
   // regions[1]: raw_cols
   {
-    RegionRequirement rr(graph.raw_col_lp, 0/*projection id*/,
+    RegionRequirement rr(graph.raw_col_lr, 0/*projection id*/,
                          READ_ONLY, EXCLUSIVE, graph.raw_col_lr);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
@@ -417,11 +423,15 @@ InitTask::InitTask(const Graph &graph,
   {
     RegionRequirement rr(graph.raw_col_lp, 0/*identity*/,
                          READ_ONLY, EXCLUSIVE, graph.raw_col_lr);
+    rr.add_field(FID_DATA);
+    add_region_requirement(rr);
   }
   // regions[6]; degrees
   {
     RegionRequirement rr(graph.degree_lp, 0/*identity*/,
                          READ_ONLY, EXCLUSIVE, graph.degree_lr);
+    rr.add_field(FID_DATA);
+    add_region_requirement(rr);
   }
 }
 
