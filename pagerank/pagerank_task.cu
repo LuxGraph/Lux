@@ -23,14 +23,14 @@
 __global__
 void load_kernel(V_ID my_in_vtxs,
                  const V_ID* in_vtxs,
-                 float* old_pr_fb,
-                 const float* old_pr_zc)
+                 Vertex* old_pr_fb,
+                 const Vertex* old_pr_zc)
 {
   for (V_ID i = blockIdx.x * blockDim.x + threadIdx.x; i < my_in_vtxs;
        i+= blockDim.x * gridDim.x)
   {
     V_ID vtx = in_vtxs[i];
-    float my_pr = old_pr_zc[vtx];
+    Vertex my_pr = old_pr_zc[vtx];
     cub::ThreadStore<cub::STORE_CG>(old_pr_fb + vtx, my_pr);
   }
 }
@@ -42,8 +42,8 @@ void pr_kernel(V_ID rowLeft,
                float initRank,
                const NodeStruct* row_ptrs,
                const EdgeStruct* col_idxs,
-               float* old_pr_fb,
-               float* new_pr_fb)
+               Vertex* old_pr_fb,
+               Vertex* new_pr_fb)
 {
   typedef cub::BlockScan<E_ID, CUDA_NUM_THREADS> BlockScan;
   __shared__ BlockScan::TempStorage temp_storage;
@@ -79,7 +79,7 @@ void pr_kernel(V_ID rowLeft,
       {
         EdgeStruct es = col_idxs[blkColStart + done + threadIdx.x - colLeft];
         float src_pr = old_pr_fb[es.src];
-        atomicAdd(new_pr_fb + es.dst - blkRowStart, src_pr);
+        atomicAdd(pr + es.dst - blkRowStart, src_pr);
       }
       done += CUDA_NUM_THREADS;
       totalNumEdges -= (totalNumEdges > CUDA_NUM_THREADS) ? 
@@ -105,8 +105,8 @@ void pagerank_task_impl(const Task *task,
   const AccessorRO<NodeStruct, 1> acc_row_ptr(regions[0], FID_DATA);
   const AccessorRO<V_ID, 1> acc_in_vtx(regions[1], FID_DATA);
   const AccessorRO<EdgeStruct, 1> acc_col_idx(regions[2], FID_DATA);
-  const AccessorRO<float, 1> acc_old_pr(regions[3], FID_DATA);
-  const AccessorRW<float, 1> acc_new_pr(regions[4], FID_DATA);
+  const AccessorRO<Vertex, 1> acc_old_pr(regions[3], FID_DATA);
+  const AccessorRW<Vertex, 1> acc_new_pr(regions[4], FID_DATA);
   Rect<1> rect_row_ptr = runtime->get_index_space_domain(
                              ctx, task->regions[0].region.get_index_space());
   Rect<1> rect_in_vtx = runtime->get_index_space_domain(
@@ -125,8 +125,8 @@ void pagerank_task_impl(const Task *task,
   const NodeStruct* row_ptrs = acc_row_ptr.ptr(rect_row_ptr);
   const V_ID* in_vtxs = acc_in_vtx.ptr(rect_in_vtx);
   const EdgeStruct* col_idxs = acc_col_idx.ptr(rect_col_idx);
-  const float* old_pr = acc_old_pr.ptr(rect_old_pr);
-  float* new_pr = acc_new_pr.ptr(rect_new_pr);
+  const Vertex* old_pr = acc_old_pr.ptr(rect_old_pr);
+  Vertex* new_pr = acc_new_pr.ptr(rect_new_pr);
   V_ID rowLeft = rect_row_ptr.lo[0], rowRight = rect_row_ptr.hi[0];
   E_ID colLeft = rect_col_idx.lo[0], colRight = rect_col_idx.hi[0];
 
@@ -138,7 +138,7 @@ void pagerank_task_impl(const Task *task,
   // Need to copy results back to new_pr
   cudaDeviceSynchronize();
   checkCUDA(cudaMemcpy(new_pr, piece->newPrFb,
-            (rowRight - rowLeft + 1) * sizeof(float), cudaMemcpyDeviceToHost));
+            (rowRight - rowLeft + 1) * sizeof(Vertex), cudaMemcpyDeviceToHost));
 }
 
 __global__
@@ -177,7 +177,7 @@ GraphPiece init_task_impl(const Task *task,
   const AccessorWO<NodeStruct, 1> acc_row_ptr(regions[0], FID_DATA);
   const AccessorWO<V_ID, 1> acc_in_vtx(regions[1], FID_DATA);
   const AccessorWO<EdgeStruct, 1> acc_col_idx(regions[2], FID_DATA);
-  const AccessorWO<float, 1> acc_new_pr(regions[3], FID_DATA);
+  const AccessorWO<Vertex, 1> acc_new_pr(regions[3], FID_DATA);
   const AccessorRO<E_ID, 1> acc_raw_rows(regions[4], FID_DATA);
   const AccessorRO<V_ID, 1> acc_raw_cols(regions[5], FID_DATA);
 
@@ -203,7 +203,7 @@ GraphPiece init_task_impl(const Task *task,
   NodeStruct* row_ptrs = acc_row_ptr.ptr(rect_row_ptr);
   V_ID* in_vtxs = acc_in_vtx.ptr(rect_in_vtx);
   EdgeStruct* col_idxs = acc_col_idx.ptr(rect_col_idx);
-  float* new_pr = acc_new_pr.ptr(rect_new_pr);
+  Vertex* new_pr = acc_new_pr.ptr(rect_new_pr);
   const E_ID* raw_rows = acc_raw_rows.ptr(rect_raw_rows);
   const V_ID* raw_cols = acc_raw_cols.ptr(rect_raw_cols);
   V_ID rowLeft = rect_row_ptr.lo[0], rowRight = rect_row_ptr.hi[0];
@@ -235,6 +235,7 @@ GraphPiece init_task_impl(const Task *task,
       rowLeft, rowRight, colLeft, row_ptrs, col_idxs, raw_rows, degrees, raw_cols);
   checkCUDA(cudaDeviceSynchronize());
   float rank = 1.0f / graph->nv;
+  assert(sizeof(float) == sizeof(Vertex));
   for (V_ID n = 0; n + rowLeft <= rowRight; n++) {
     new_pr[n] = degrees[n] == 0 ? rank : rank / degrees[n];
   }
@@ -250,10 +251,10 @@ GraphPiece init_task_impl(const Task *task,
   Realm::MemoryImpl* memImpl =
       Realm::get_runtime()->get_memory_impl(*memFB.begin());
   Realm::Cuda::GPUFBMemory* memFBImpl = (Realm::Cuda::GPUFBMemory*) memImpl;
-  off_t offset = memFBImpl->alloc_bytes(sizeof(float) * graph->nv);
-  piece.oldPrFb = (float*) memFBImpl->get_direct_ptr(offset, 0);
-  offset = memFBImpl->alloc_bytes(sizeof(float) * (rowRight - rowLeft + 1));
-  piece.newPrFb = (float*) memFBImpl->get_direct_ptr(offset, 0);
+  off_t offset = memFBImpl->alloc_bytes(sizeof(Vertex) * graph->nv);
+  piece.oldPrFb = (Vertex*) memFBImpl->get_direct_ptr(offset, 0);
+  offset = memFBImpl->alloc_bytes(sizeof(Vertex) * (rowRight - rowLeft + 1));
+  piece.newPrFb = (Vertex*) memFBImpl->get_direct_ptr(offset, 0);
   //checkCUDA(cudaMalloc(&(piece.oldPrFb), sizeof(float) * graph->nv));
   //checkCUDA(cudaMalloc(&(piece.newPrFb), sizeof(float) * (rowRight-rowLeft+1)));
   return piece;

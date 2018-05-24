@@ -70,7 +70,7 @@ public:
   V_ID myInVtxs;
   V_ID nv;
   E_ID ne;
-  float *oldPrFb, *newPrFb;
+  Vertex *oldPrFb, *newPrFb;
 };
 
 class LoadTask : public IndexLauncher
@@ -104,6 +104,14 @@ public:
           const ArgumentMap &arg_map,
           int iteration);
 };
+
+void load_task_impl(const Task *task,
+                    const std::vector<PhysicalRegion> &regions,
+                    Context ctx, Runtime *runtime);
+
+void scan_task_impl(const Task *task,
+                    const std::vector<PhysicalRegion> &regions,
+                    Context ctx, Runtime *runtime);
 
 void pagerank_task_impl(const Task *task,
                         const std::vector<PhysicalRegion> &regions,
