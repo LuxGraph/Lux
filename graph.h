@@ -1,5 +1,4 @@
-/* Copyright 2016 Stanford, UT Austin, LANL
-   Add a comment to this line
+/* Copyright 2018 Stanford, UT Austin, LANL
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +17,7 @@
 #define _LUX_GRAPH_H_
 
 #include <cstdio>
+#include "app.h"
 #include "legion.h"
 #include <unistd.h>
 
@@ -26,10 +26,7 @@ template<typename FT, int N, typename T = coord_t> using AccessorRO = FieldAcces
 template<typename FT, int N, typename T = coord_t> using AccessorRW = FieldAccessor<READ_WRITE,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
 template<typename FT, int N, typename T = coord_t> using AccessorWO = FieldAccessor<WRITE_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
 
-typedef uint32_t V_ID;
-typedef uint64_t E_ID;
 #define MAX_FILE_LEN 64
-#define ALPHA 0.15
 #define FILE_HEADER_SIZE (sizeof(E_ID) + sizeof(V_ID))
 
 enum {
@@ -42,15 +39,6 @@ enum {
 
 enum FieldIDs {
   FID_DATA,
-};
-
-struct NodeStruct {
-  E_ID index;
-  V_ID degree;
-};
-
-struct EdgeStruct {
-  V_ID src, dst;
 };
 
 class Graph

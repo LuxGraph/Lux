@@ -15,6 +15,8 @@
 
 #include "../graph.h"
 #include "../cuda_helper.h"
+#include "realm/runtime_impl.h"
+#include "realm/cuda/cuda_module.h"
 #include <cuda_runtime.h>
 #include <cub/cub.cuh>
 
@@ -240,8 +242,20 @@ GraphPiece init_task_impl(const Task *task,
   piece.myInVtxs = myInVtx;
   piece.nv = graph->nv;
   piece.ne = graph->ne;
-  checkCUDA(cudaMalloc(&(piece.oldPrFb), sizeof(float) * graph->nv));
-  checkCUDA(cudaMalloc(&(piece.newPrFb), sizeof(float) * (rowRight-rowLeft+1)));
+  // Allocate oldPrFb/newPrFb on the same memory as row_ptr
+  std::set<Memory> memFB;
+  regions[0].get_memories(memFB);
+  assert(memFB.size() == 1);
+  assert(memFB.begin()->kind() == Memory::GPU_FB_MEM);
+  Realm::MemoryImpl* memImpl =
+      Realm::get_runtime()->get_memory_impl(*memFB.begin());
+  Realm::Cuda::GPUFBMemory* memFBImpl = (Realm::Cuda::GPUFBMemory*) memImpl;
+  off_t offset = memFBImpl->alloc_bytes(sizeof(float) * graph->nv);
+  piece.oldPrFb = (float*) memFBImpl->get_direct_ptr(offset, 0);
+  offset = memFBImpl->alloc_bytes(sizeof(float) * (rowRight - rowLeft + 1));
+  piece.newPrFb = (float*) memFBImpl->get_direct_ptr(offset, 0);
+  //checkCUDA(cudaMalloc(&(piece.oldPrFb), sizeof(float) * graph->nv));
+  //checkCUDA(cudaMalloc(&(piece.newPrFb), sizeof(float) * (rowRight-rowLeft+1)));
   return piece;
 }
 

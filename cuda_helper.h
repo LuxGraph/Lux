@@ -21,7 +21,7 @@
 
 
 // Use 1024 threads per block, which requires cuda sm_2x or above
-const int CUDA_NUM_THREADS = 1024;
+const int CUDA_NUM_THREADS = 512;
 const int BLOCK_SIZE_LIMIT = 32768;
 
 // CUDA: number of blocks for threads.

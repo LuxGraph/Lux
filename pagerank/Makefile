@@ -33,7 +33,7 @@ GEN_SRC		?= pagerank.cc pagerank_mapper.cc	# .cc files
 GEN_GPU_SRC	?= pagerank_task.cu					# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
-INC_FLAGS	?= -I../cub
+INC_FLAGS	?= -I../cub -I.
 CC_FLAGS	?=
 NVCC_FLAGS	?=
 GASNET_FLAGS	?=
