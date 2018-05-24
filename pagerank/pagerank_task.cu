@@ -47,7 +47,7 @@ void pr_kernel(V_ID rowLeft,
 {
   typedef cub::BlockScan<E_ID, CUDA_NUM_THREADS> BlockScan;
   __shared__ BlockScan::TempStorage temp_storage;
-  __shared__ float pr[CUDA_NUM_THREADS];
+  //__shared__ float pr[CUDA_NUM_THREADS];
   __shared__ E_ID blkColStart;
   for (V_ID blkRowStart = blockIdx.x * blockDim.x + rowLeft; blkRowStart <= rowRight;
        blkRowStart += blockDim.x * gridDim.x)
@@ -68,7 +68,7 @@ void pr_kernel(V_ID rowLeft,
       if (threadIdx.x == 0)
         blkColStart = start_col_idx;
     }
-    pr[threadIdx.x] = 0;
+    new_pr_fb[curVtx - rowLeft] = 0;
 
     __syncthreads();
     BlockScan(temp_storage).ExclusiveSum(myNumEdges, scratchOffset, totalNumEdges);
@@ -79,14 +79,14 @@ void pr_kernel(V_ID rowLeft,
       {
         EdgeStruct es = col_idxs[blkColStart + done + threadIdx.x - colLeft];
         float src_pr = old_pr_fb[es.src];
-        atomicAdd(pr + es.dst - blkRowStart, src_pr);
+        atomicAdd(new_pr_fb + es.dst - rowLeft, src_pr);
       }
       done += CUDA_NUM_THREADS;
       totalNumEdges -= (totalNumEdges > CUDA_NUM_THREADS) ? 
                        CUDA_NUM_THREADS : totalNumEdges;
     }
     __syncthreads();
-    float my_pr = initRank + ALPHA * pr[threadIdx.x];
+    float my_pr = initRank + ALPHA * new_pr_fb[curVtx - rowLeft];
     if (myDegree != 0)
       my_pr = my_pr / myDegree;
     new_pr_fb[curVtx - rowLeft] = my_pr;
