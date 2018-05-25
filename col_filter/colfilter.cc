@@ -84,7 +84,7 @@ static void update_mappers(Machine machine, Runtime *rt,
   for (std::set<Processor>::const_iterator it = local_procs.begin();
         it != local_procs.end(); it++)
   {
-    rt->replace_default_mapper(new LuxMapper(machine, rt, *it), *it);
+    //rt->replace_default_mapper(new LuxMapper(machine, rt, *it), *it);
   }
 }
 

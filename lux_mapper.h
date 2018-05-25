@@ -34,10 +34,13 @@ public:
                           const Task& task,
                           const SliceTaskInput& input,
                           SliceTaskOutput& output);
-  virtual void map_task(const MapperContext ctx,
-                        const Task& task,
-                        const MapTaskInput& input,
-                        MapTaskOutput& output);
+  virtual Memory default_policy_select_target_memory(MapperContext ctx,
+                                                     Processor target_proc,
+                                                     const RegionRequirement &req);
+  //virtual void map_task(const MapperContext ctx,
+  //                      const Task& task,
+  //                      const MapTaskInput& input,
+  //                      MapTaskOutput& output);
 protected:
   unsigned int numNodes;
   std::vector<TaskSlice> gpuSlices, cpuSlices;

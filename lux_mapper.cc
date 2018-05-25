@@ -133,6 +133,28 @@ void LuxMapper::slice_task(const MapperContext ctx,
   }
 }
 
+Memory LuxMapper::default_policy_select_target_memory(MapperContext ctx,
+                                                      Processor target_proc,
+                                                      const RegionRequirement &req)
+{
+   return DefaultMapper::default_policy_select_target_memory(
+             ctx, target_proc, req);
+  if (req.tag == MAP_TO_FB_MEMORY) {
+    assert(memFBs.find(target_proc) != memFBs.end());
+    return memFBs[target_proc];
+  } else if (req.tag == MAP_TO_ZC_MEMORY) {
+    assert(memZCs.find(target_proc) != memZCs.end());
+    return memZCs[target_proc];
+  } else {
+    assert(req.tag == 0);
+    return DefaultMapper::default_policy_select_target_memory(
+               ctx, target_proc, req);
+    //assert(memZCs.find(target_proc) != memZCs.end());
+    //return memZCs[target_proc];
+  }
+}
+
+/*
 void LuxMapper::map_task(const MapperContext ctx,
                               const Task& task,
                               const MapTaskInput& input,
@@ -158,6 +180,24 @@ void LuxMapper::map_task(const MapperContext ctx,
         tgt_mem = memFBs[task.target_proc];
       else
         tgt_mem = memZCs[task.target_proc];
+      // Check to see if any of the valid instances can be used
+      std::vector<PhysicalInstance> valid_instances;
+      for (std::vector<PhysicalInstance>::const_iterator
+            it = input.valid_instances[idx].begin(),
+            ie = input.valid_instances[idx].end(); it != ie; ++it)
+      {
+        if (it->get_location() == tgt_mem)
+          valid_instances.push_back(*it);
+      }
+      printf("valid_instances.size() = %zu\n", valid_instances.size());
+      std::set<FieldID> valid_missing_fields;
+      runtime->filter_instances(ctx, task, idx, output.chosen_variant,
+                                valid_instances, valid_missing_fields);
+      runtime->acquire_and_filter_instances(ctx, valid_instances);
+      output.chosen_instances[idx] = valid_instances;
+      printf("valid_missing_fields.size() = %zu\n", valid_missing_fields.size());
+      if (valid_missing_fields.empty())
+        continue;
       if (!default_create_custom_instances(ctx, task.target_proc,
                tgt_mem, task.regions[idx], idx, missing_fields[idx],
                layout_constraints, false, output.chosen_instances[idx]))
@@ -183,4 +223,4 @@ void LuxMapper::map_task(const MapperContext ctx,
     DefaultMapper::map_task(ctx, task, input, output);
   }
 }
-
+*/

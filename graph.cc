@@ -342,28 +342,32 @@ InitTask::InitTask(const Graph &graph,
   // regions[0]: row_ptrs
   {
     RegionRequirement rr(graph.row_ptr_lp, 0/*identity*/,
-                         WRITE_ONLY, EXCLUSIVE, graph.row_ptr_lr);
+                         WRITE_ONLY, EXCLUSIVE, graph.row_ptr_lr,
+                         MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
   // regions[1]: in_vtxs
   {
     RegionRequirement rr(graph.in_vtx_lp, 0/*identity*/,
-                         WRITE_ONLY, EXCLUSIVE, graph.in_vtx_lr);
+                         WRITE_ONLY, EXCLUSIVE, graph.in_vtx_lr,
+                         MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
   // regions[2]: col_idxs
   {
     RegionRequirement rr(graph.col_idx_lp, 0/*identity*/,
-                         WRITE_ONLY, EXCLUSIVE, graph.col_idx_lr);
+                         WRITE_ONLY, EXCLUSIVE, graph.col_idx_lr,
+                         MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
   // regions[3]: new_pr
   {
     RegionRequirement rr(graph.dist_lp[0], 0/*idenity*/,
-                         WRITE_ONLY, EXCLUSIVE, graph.dist_lr[0]);
+                         WRITE_ONLY, EXCLUSIVE, graph.dist_lr[0],
+                         MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
@@ -411,35 +415,40 @@ AppTask::AppTask(const Graph &graph,
   // regions[0]: row_ptrs
   {
     RegionRequirement rr(graph.row_ptr_lp, 0/*identity*/,
-                         READ_ONLY, EXCLUSIVE, graph.row_ptr_lr);
+                         READ_ONLY, EXCLUSIVE, graph.row_ptr_lr,
+                         MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
   // regions[1]: in_vtxs
   {
     RegionRequirement rr(graph.in_vtx_lp, 0/*identity*/,
-                         READ_ONLY, EXCLUSIVE, graph.in_vtx_lr);
+                         READ_ONLY, EXCLUSIVE, graph.in_vtx_lr,
+                         MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
   // regions[2]: col_idxs
   {
     RegionRequirement rr(graph.col_idx_lp, 0/*identity*/,
-                         READ_ONLY, EXCLUSIVE, graph.col_idx_lr);
+                         READ_ONLY, EXCLUSIVE, graph.col_idx_lr,
+                         MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
   // regions[3]: old_pr
   {
     RegionRequirement rr(graph.dist_lr[iter%2], 0/*identity*/,
-                         READ_ONLY, EXCLUSIVE, graph.dist_lr[iter%2]);
+                         READ_ONLY, EXCLUSIVE, graph.dist_lr[iter%2],
+                         MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
   // regions[4]: new_pr
   {
     RegionRequirement rr(graph.dist_lp[(iter+1)%2], 0/*identity*/,
-                         WRITE_ONLY, EXCLUSIVE, graph.dist_lr[(iter+1)%2]);
+                         WRITE_ONLY, EXCLUSIVE, graph.dist_lr[(iter+1)%2],
+                         MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }

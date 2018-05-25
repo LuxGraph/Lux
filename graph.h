@@ -28,6 +28,8 @@ template<typename FT, int N, typename T = coord_t> using AccessorWO = FieldAcces
 
 #define MAX_FILE_LEN 64
 #define FILE_HEADER_SIZE (sizeof(E_ID) + sizeof(V_ID))
+#define MAP_TO_FB_MEMORY 0xABCD0000
+#define MAP_TO_ZC_MEMORY 0xABCD1111
 
 enum {
   TOP_LEVEL_TASK_ID,
