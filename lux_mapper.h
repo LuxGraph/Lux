@@ -22,10 +22,10 @@
 using namespace Legion;
 using namespace Legion::Mapping;
 
-class PageRankMapper : public DefaultMapper {
+class LuxMapper : public DefaultMapper {
 public:
-  PageRankMapper(Machine machine, Runtime *runtime, Processor local);
-  ~PageRankMapper();
+  LuxMapper(Machine machine, Runtime *runtime, Processor local);
+  ~LuxMapper();
 public:
   virtual void select_task_options(const MapperContext ctx,
                                    const Task& task,

@@ -20,6 +20,17 @@
 #include <cuda_runtime.h>
 #include <cub/cub.cuh>
 
+// Use 1024 threads per block, which requires cuda sm_2x or above
+const int CUDA_NUM_THREADS = 512;
+const int BLOCK_SIZE_LIMIT = 32768;
+
+// CUDA: number of blocks for threads.
+inline int GET_BLOCKS(const int N)
+{
+  int ret = (N + CUDA_NUM_THREADS - 1) / CUDA_NUM_THREADS;
+  return (ret > BLOCK_SIZE_LIMIT) ? BLOCK_SIZE_LIMIT : ret;
+}
+
 __global__
 void load_kernel(V_ID my_in_vtxs,
                  const V_ID* in_vtxs,
@@ -55,8 +66,7 @@ void pr_kernel(V_ID rowLeft,
     E_ID myNumEdges = 0, scratchOffset, totalNumEdges = 0;
     V_ID myDegree = 0;
     V_ID curVtx = blkRowStart + threadIdx.x;
-    if (curVtx <= rowRight)
-    {
+    if (curVtx <= rowRight) {
       NodeStruct ns = row_ptrs[curVtx - rowLeft];
       E_ID start_col_idx, end_col_idx = ns.index;
       myDegree = ns.degree;
@@ -67,16 +77,14 @@ void pr_kernel(V_ID rowLeft,
       myNumEdges = end_col_idx - start_col_idx;
       if (threadIdx.x == 0)
         blkColStart = start_col_idx;
+      new_pr_fb[curVtx - rowLeft] = 0;
     }
-    new_pr_fb[curVtx - rowLeft] = 0;
 
     __syncthreads();
     BlockScan(temp_storage).ExclusiveSum(myNumEdges, scratchOffset, totalNumEdges);
     E_ID done = 0;
-    while (totalNumEdges > 0)
-    {
-      if (threadIdx.x < totalNumEdges)
-      {
+    while (totalNumEdges > 0) {
+      if (threadIdx.x < totalNumEdges) {
         EdgeStruct es = col_idxs[blkColStart + done + threadIdx.x - colLeft];
         float src_pr = old_pr_fb[es.src];
         atomicAdd(new_pr_fb + es.dst - rowLeft, src_pr);
@@ -94,9 +102,9 @@ void pr_kernel(V_ID rowLeft,
 }
 
 /*static*/
-void pagerank_task_impl(const Task *task,
-                        const std::vector<PhysicalRegion> &regions,
-                        Context ctx, Runtime *runtime)
+void app_task_impl(const Task *task,
+                   const std::vector<PhysicalRegion> &regions,
+                   Context ctx, Runtime *runtime)
 {
   assert(regions.size() == 5);
   assert(task->regions.size() == 5);
@@ -106,7 +114,7 @@ void pagerank_task_impl(const Task *task,
   const AccessorRO<V_ID, 1> acc_in_vtx(regions[1], FID_DATA);
   const AccessorRO<EdgeStruct, 1> acc_col_idx(regions[2], FID_DATA);
   const AccessorRO<Vertex, 1> acc_old_pr(regions[3], FID_DATA);
-  const AccessorRW<Vertex, 1> acc_new_pr(regions[4], FID_DATA);
+  const AccessorWO<Vertex, 1> acc_new_pr(regions[4], FID_DATA);
   Rect<1> rect_row_ptr = runtime->get_index_space_domain(
                              ctx, task->regions[0].region.get_index_space());
   Rect<1> rect_in_vtx = runtime->get_index_space_domain(
@@ -138,12 +146,16 @@ void pagerank_task_impl(const Task *task,
   // Need to copy results back to new_pr
   cudaDeviceSynchronize();
   checkCUDA(cudaMemcpy(new_pr, piece->newPrFb,
-            (rowRight - rowLeft + 1) * sizeof(Vertex), cudaMemcpyDeviceToHost));
+            (rowRight - rowLeft + 1) * sizeof(Vertex),
+            cudaMemcpyDeviceToHost));
 }
 
 __global__
-void init_kernel(V_ID rowLeft, V_ID rowRight, E_ID colLeft,
-                 NodeStruct* row_ptrs, EdgeStruct* col_idxs,
+void init_kernel(V_ID rowLeft,
+                 V_ID rowRight,
+                 E_ID colLeft,
+                 NodeStruct* row_ptrs,
+                 EdgeStruct* col_idxs,
                  const E_ID* raw_rows,
                  const V_ID* degrees,
                  const V_ID* raw_cols)
@@ -171,8 +183,14 @@ GraphPiece init_task_impl(const Task *task,
                           const std::vector<PhysicalRegion> &regions,
                           Context ctx, Runtime *runtime)
 {
-  assert(regions.size() == 6 || regions.size() == 7);
-  assert(task->regions.size() == 6 || regions.size() == 7);
+#ifndef VERTEX_DEGREE
+  assert(false);
+#endif
+#ifdef EDGE_WEIGHT
+  assert(false);
+#endif
+  assert(regions.size() == 7);
+  assert(task->regions.size() == 7);
   const Graph *graph = (Graph*) task->args;
   const AccessorWO<NodeStruct, 1> acc_row_ptr(regions[0], FID_DATA);
   const AccessorWO<V_ID, 1> acc_in_vtx(regions[1], FID_DATA);

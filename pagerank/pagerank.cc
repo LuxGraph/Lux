@@ -15,7 +15,7 @@
 
 #include <cstdio>
 #include "../graph.h"
-#include "pagerank_mapper.h"
+#include "../lux_mapper.h"
 #include "math.h"
 #include "legion.h"
 #include "queue"
@@ -63,8 +63,7 @@ void top_level_task(const Task *task, const std::vector<PhysicalRegion> &regions
   InitTask init_task(graph, task_is, local_args);
   fm = runtime->execute_index_space(ctx, init_task);
   fm.wait_all_results();
-  for (PointInRectIterator<1> it(task_rect); it(); it++)
-  {
+  for (PointInRectIterator<1> it(task_rect); it(); it++) {
     GraphPiece piece = fm.get_result<GraphPiece>(*it);
     local_args.set_point(*it, TaskArgument(&piece, sizeof(GraphPiece)));
   }
@@ -73,11 +72,10 @@ void top_level_task(const Task *task, const std::vector<PhysicalRegion> &regions
   int iteration = 0;
   log_pr.print("Start PageRank computation...");
   double ts_start = Realm::Clock::current_time_in_microseconds(); 
-  for (int i = 0; i < numIter; i++)
-  {
+  for (int i = 0; i < numIter; i++) {
     iteration = i;
-    BFSTask bfs_task(graph, task_is, local_args, iteration);
-    fm = runtime->execute_index_space(ctx, bfs_task);
+    AppTask app_task(graph, task_is, local_args, iteration);
+    fm = runtime->execute_index_space(ctx, app_task);
   }
   fm.wait_all_results();
   double ts_end = Realm::Clock::current_time_in_microseconds();
@@ -92,7 +90,7 @@ static void update_mappers(Machine machine, Runtime *rt,
   for (std::set<Processor>::const_iterator it = local_procs.begin();
         it != local_procs.end(); it++)
   {
-    rt->replace_default_mapper(new PageRankMapper(machine, rt, *it), *it);
+    rt->replace_default_mapper(new LuxMapper(machine, rt, *it), *it);
   }
 }
 
@@ -148,10 +146,10 @@ int main(int argc, char **argv)
         registrar, "init_task");
   }
   {
-    TaskVariantRegistrar registrar(PAGERANK_TASK_ID, "pagerank_task");
+    TaskVariantRegistrar registrar(APP_TASK_ID, "pagerank_task");
     registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
     registrar.set_leaf();
-    Runtime::preregister_task_variant<pagerank_task_impl>(
+    Runtime::preregister_task_variant<app_task_impl>(
         registrar, "pagerank_task");
   }
   Runtime::add_registration_callback(update_mappers);

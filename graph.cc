@@ -71,7 +71,6 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     // Make logical regions
     row_ptr_lr = runtime->create_logical_region(ctx, vtx_is, row_ptr_fs);
     raw_row_lr = runtime->create_logical_region(ctx, vtx_is, raw_row_fs);
-    degree_lr = runtime->create_logical_region(ctx, vtx_is, in_vtx_fs);
     in_vtx_lr = runtime->create_logical_region(ctx, edge_is, in_vtx_fs);
     col_idx_lr = runtime->create_logical_region(ctx, edge_is, col_idx_fs);
     raw_col_lr = runtime->create_logical_region(ctx, edge_is, raw_col_fs);
@@ -79,6 +78,20 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     {
       dist_lr[i] = runtime->create_logical_region(ctx, vtx_is, dist_fs);
     }
+#ifdef VERTEX_DEGREE
+    degree_lr = runtime->create_logical_region(ctx, vtx_is, in_vtx_fs);
+#else
+    degree_lr = LogicalRegion::NO_REGION;
+#endif
+
+#ifdef EDGE_WEIGHT
+    FieldSpace raw_weight_fs = runtime->create_field_space(ctx);
+    runtime->attach_name(raw_weight_fs, "raw_weight");
+    alloc_fs<WeightType>(ctx, runtime, raw_weight_fs);
+    raw_weight_lr = runtime->create_logical_region(ctx, edge_is, raw_weight_fs);
+#else
+    raw_weight_lr = LogicalRegion::NO_REGION;
+#endif
   //}
 
   E_ID* raw_rows = (E_ID*) malloc(nv * sizeof(E_ID));
@@ -134,11 +147,15 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
                                         pvt_vtx_coloring, true);
     row_ptr_lp = runtime->get_logical_partition(ctx, row_ptr_lr, vtx_ip);
     raw_row_lp = runtime->get_logical_partition(ctx, raw_row_lr, vtx_ip);
-    degree_lp = runtime->get_logical_partition(ctx, degree_lr, vtx_ip);
     for (int i = 0; i < 2; i++)
     {
       dist_lp[i] = runtime->get_logical_partition(ctx, dist_lr[i], vtx_ip);
     }
+#ifdef VERTEX_DEGREE
+    degree_lp = runtime->get_logical_partition(ctx, degree_lr, vtx_ip);
+#else
+    degree_lp = LogicalPartition::NO_PART;
+#endif
   }
   // Second, we partition the edges
   {
@@ -157,12 +174,18 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     IndexPartition col_idx_ip
       = runtime->create_index_partition(ctx, edge_is, color_domain,
                                         edges_coloring, true);
-    col_idx_lp
-      = runtime->get_logical_partition(ctx, col_idx_lr, col_idx_ip);
-    raw_col_lp
-      = runtime->get_logical_partition(ctx, raw_col_lr, col_idx_ip);
-    in_vtx_lp
-      = runtime->get_logical_partition(ctx, in_vtx_lr, col_idx_ip);
+    col_idx_lp =
+        runtime->get_logical_partition(ctx, col_idx_lr, col_idx_ip);
+    raw_col_lp =
+        runtime->get_logical_partition(ctx, raw_col_lr, col_idx_ip);
+    in_vtx_lp =
+        runtime->get_logical_partition(ctx, in_vtx_lr, col_idx_ip);
+#ifdef EDGE_WEIGHT
+    raw_weight_lp =
+        runtime->get_logical_partition(ctx, raw_weight_lr, col_idx_ip);
+#else
+    raw_weight_lp = LogicalPartition::NO_PART;
+#endif
   }
   free(raw_rows);
 }
@@ -187,6 +210,15 @@ LoadTask::LoadTask(const Graph &graph,
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
+#ifdef EDGE_WEIGHT
+  // regions[2]: raw_weights
+  {
+    RegionRequirement rr(graph.raw_weight_lp, 0/*projection id*/,
+                         WRITE_ONLY, EXCLUSIVE, graph.raw_weight_lr);
+    rr.add_field(FID_DATA);
+    add_region_requirement(rr);
+  }
+#endif
 }
 
 ScanTask::ScanTask(const Graph &graph)
@@ -212,8 +244,13 @@ void load_task_impl(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx, Runtime* runtime)
 {
+#ifdef EDGE_WEIGHT
+  assert(regions.size() == 3);
+  assert(task->regions.size() == 3);
+#else
   assert(regions.size() == 2);
   assert(task->regions.size() == 2);
+#endif
   char* file_name = (char*) task->args;
   const AccessorWO<E_ID, 1> acc_raw_rows(regions[0], FID_DATA);
   const AccessorWO<V_ID, 1> acc_raw_cols(regions[1], FID_DATA);
@@ -227,6 +264,14 @@ void load_task_impl(const Task *task,
   assert(acc_raw_cols.accessor.is_dense_arbitrary(rect_raw_cols));
   E_ID* raw_rows = acc_raw_rows.ptr(rect_raw_rows.lo);
   V_ID* raw_cols = acc_raw_cols.ptr(rect_raw_cols.lo);
+#ifdef EDGE_WEIGHT
+  const AccessorWO<WeightType, 1> acc_raw_weights(regions[2], FID_DATA);
+  Rect<1> rect_raw_weights = runtime->get_index_space_domain(
+                               ctx, task->regions[2].region.get_index_space());
+  assert(rect_raw_weights == rect_raw_cols);
+  assert(acc_raw_weights.accessor.is_dense_arbitrary(rect_raw_weights));
+  WeightType* raw_weights = acc_raw_weights.ptr(rect_raw_weights.lo);
+#endif
   // Load row pointers and col indices
   log_lux.print("Load task: file(%s) rowLeft(%u) rowRight(%u) colLeft(%zu) colRight(%zu)",
                file_name, rowLeft, rowRight, colLeft, colRight);
@@ -235,8 +280,9 @@ void load_task_impl(const Task *task,
   int fseek_ret;
   size_t fread_ret;
   V_ID nv;
-  fread_ret = fread(&nv, sizeof(V_ID), 1, fd);
-  assert(fread_ret == 1);
+  E_ID ne;
+  assert(fread(&nv, sizeof(V_ID), 1, fd) == 1);
+  assert(fread(&ne, sizeof(E_ID), 1, fd) == 1);
   fseek_ret =
     fseeko(fd, FILE_HEADER_SIZE + sizeof(E_ID) * (size_t)rowLeft, SEEK_SET);
   assert(fseek_ret == 0);
@@ -250,6 +296,16 @@ void load_task_impl(const Task *task,
   fread_ret =
     fread(raw_cols, sizeof(V_ID), (size_t)(colRight - colLeft + 1), fd);
   assert(fread_ret == colRight - colLeft + 1);
+#ifdef EDGE_WEIGHT
+  fseek_ret =
+    fseeko(fd, FILE_HEADER_SIZE + sizeof(E_ID) * (size_t)nv 
+               + sizeof(V_ID) * (size_t)ne
+               + sizeof(WeightType) * (size_t)colLeft, SEEK_SET);
+  assert(fseek_ret == 0);
+  fread_ret =
+    fread(raw_weights, sizeof(WeightType), (size_t)(colRight - colLeft + 1), fd);
+  assert(fread_ret == colRight - colLeft + 1);
+#endif
 }
 
 void scan_task_impl(const Task *task,
@@ -318,27 +374,38 @@ InitTask::InitTask(const Graph &graph,
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
-  // regions[5]; raw_cols
+  // regions[5]: raw_cols
   {
     RegionRequirement rr(graph.raw_col_lp, 0/*identity*/,
                          READ_ONLY, EXCLUSIVE, graph.raw_col_lr);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
-  // regions[6]; degrees
-  if (REQUIRE_VERTEX_DEGREE) {
+#ifdef VERTEX_DEGREE
+  // regions[6]: degrees
+  {
     RegionRequirement rr(graph.degree_lp, 0/*identity*/,
                          READ_ONLY, EXCLUSIVE, graph.degree_lr);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
+#endif
+#ifdef EDGE_WEIGHT
+  // regions[6/7]: raw_weights
+  {
+    RegionRequirement rr(graph.raw_weight_lp, 0/*identity*/,
+                         READ_ONLY, EXCLUSIVE, graph.raw_weight_lr);
+    rr.add_field(FID_DATA);
+    add_region_requirement(rr);
+  }
+#endif
 }
 
-BFSTask::BFSTask(const Graph &graph,
+AppTask::AppTask(const Graph &graph,
                  const IndexSpaceT<1> &domain,
                  const ArgumentMap &arg_map,
                  int iter)
-  : IndexLauncher(PAGERANK_TASK_ID, domain,
+  : IndexLauncher(APP_TASK_ID, domain,
                   TaskArgument(&iter, sizeof(int)), arg_map)
 {
   // regions[0]: row_ptrs
@@ -377,4 +444,3 @@ BFSTask::BFSTask(const Graph &graph,
     add_region_requirement(rr);
   }
 }
-

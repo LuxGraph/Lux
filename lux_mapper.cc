@@ -13,10 +13,10 @@
  * limitations under the License.
  */
 
-#include "pagerank_mapper.h"
-#include "../graph.h"
+#include "lux_mapper.h"
+#include "graph.h"
 
-PageRankMapper::PageRankMapper(Machine m, Runtime *rt, Processor p)
+LuxMapper::LuxMapper(Machine m, Runtime *rt, Processor p)
   : DefaultMapper(rt->get_mapper_runtime(), m, p)
 {
   numNodes = remote_gpus.size();
@@ -71,7 +71,7 @@ PageRankMapper::PageRankMapper(Machine m, Runtime *rt, Processor p)
   }
 }
 
-PageRankMapper::~PageRankMapper()
+LuxMapper::~LuxMapper()
 {
   std::map<unsigned, std::vector<Processor>* >::iterator it;
   for (it = allGPUs.begin(); it != allGPUs.end(); it++)
@@ -80,19 +80,19 @@ PageRankMapper::~PageRankMapper()
     delete it->second;
 }
 
-void PageRankMapper::select_task_options(const MapperContext ctx,
+void LuxMapper::select_task_options(const MapperContext ctx,
                                          const Task& task,
                                          TaskOptions& output)
 {
   DefaultMapper::select_task_options(ctx, task, output);
 }
 
-void PageRankMapper::slice_task(const MapperContext ctx,
+void LuxMapper::slice_task(const MapperContext ctx,
                                 const Task& task,
                                 const SliceTaskInput& input,
                                 SliceTaskOutput& output)
 {
-  if (task.task_id == PAGERANK_TASK_ID || task.task_id == INIT_TASK_ID) {
+  if (task.task_id == APP_TASK_ID || task.task_id == INIT_TASK_ID) {
     if (gpuSlices.size() > 0) {
       output.slices = gpuSlices;
       return;
@@ -133,7 +133,7 @@ void PageRankMapper::slice_task(const MapperContext ctx,
   }
 }
 
-void PageRankMapper::map_task(const MapperContext ctx,
+void LuxMapper::map_task(const MapperContext ctx,
                               const Task& task,
                               const MapTaskInput& input,
                               MapTaskOutput& output)
@@ -150,7 +150,7 @@ void PageRankMapper::map_task(const MapperContext ctx,
                             output.chosen_instances, missing_fields);
   const TaskLayoutConstraintSet &layout_constraints =
     runtime->find_task_layout_constraints(ctx, task.task_id, output.chosen_variant);
-  if (task.task_id == PAGERANK_TASK_ID || task.task_id == INIT_TASK_ID) {
+  if (task.task_id == APP_TASK_ID || task.task_id == INIT_TASK_ID) {
     assert(task.target_proc.kind() == Processor::TOC_PROC);
     for (unsigned idx = 0; idx < task.regions.size(); idx++) {
       Memory tgt_mem = Memory::NO_MEMORY;
@@ -179,6 +179,8 @@ void PageRankMapper::map_task(const MapperContext ctx,
             task.target_proc, tgt_mem);
       }
     }
+  } else {
+    DefaultMapper::map_task(ctx, task, input, output);
   }
 }
 

@@ -34,7 +34,7 @@ enum {
   LOAD_TASK_ID,
   SCAN_TASK_ID,
   INIT_TASK_ID,
-  PAGERANK_TASK_ID,
+  APP_TASK_ID,
 };
 
 enum FieldIDs {
@@ -60,6 +60,8 @@ public:
   LogicalPartition raw_col_lp;
   LogicalRegion degree_lr;
   LogicalPartition degree_lp;
+  LogicalRegion raw_weight_lr;
+  LogicalPartition raw_weight_lp;
   LogicalRegion dist_lr[2];
   LogicalPartition dist_lp[2];
 };
@@ -96,10 +98,10 @@ public:
            const ArgumentMap &arg_map);
 };
 
-class BFSTask : public IndexLauncher
+class AppTask : public IndexLauncher
 {
 public:
-  BFSTask(const Graph &graph,
+  AppTask(const Graph &graph,
           const IndexSpaceT<1> &domain,
           const ArgumentMap &arg_map,
           int iteration);
@@ -113,9 +115,9 @@ void scan_task_impl(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx, Runtime *runtime);
 
-void pagerank_task_impl(const Task *task,
-                        const std::vector<PhysicalRegion> &regions,
-                        Context ctx, Runtime *runtime);
+void app_task_impl(const Task *task,
+                   const std::vector<PhysicalRegion> &regions,
+                   Context ctx, Runtime *runtime);
 
 GraphPiece init_task_impl(const Task *task,
                           const std::vector<PhysicalRegion> &regions,
