@@ -147,10 +147,10 @@ Memory LuxMapper::default_policy_select_target_memory(MapperContext ctx,
     return memZCs[target_proc];
   } else {
     assert(req.tag == 0);
-    return DefaultMapper::default_policy_select_target_memory(
-               ctx, target_proc, req);
-    //assert(memZCs.find(target_proc) != memZCs.end());
-    //return memZCs[target_proc];
+    //return DefaultMapper::default_policy_select_target_memory(
+    //           ctx, target_proc, req);
+    assert(memZCs.find(target_proc) != memZCs.end());
+    return memZCs[target_proc];
   }
 }
 

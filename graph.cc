@@ -199,14 +199,16 @@ LoadTask::LoadTask(const Graph &graph,
   // regions[0]: raw_rows
   {
     RegionRequirement rr(graph.raw_row_lp, 0/*projection id*/,
-                         WRITE_ONLY, EXCLUSIVE, graph.raw_row_lr);
+                         WRITE_ONLY, EXCLUSIVE, graph.raw_row_lr,
+                         MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
   // regions[1]: raw_cols
   {
     RegionRequirement rr(graph.raw_col_lp, 0/*projection id*/,
-                         WRITE_ONLY, EXCLUSIVE, graph.raw_col_lr);
+                         WRITE_ONLY, EXCLUSIVE, graph.raw_col_lr,
+                         MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
@@ -214,7 +216,8 @@ LoadTask::LoadTask(const Graph &graph,
   // regions[2]: raw_weights
   {
     RegionRequirement rr(graph.raw_weight_lp, 0/*projection id*/,
-                         WRITE_ONLY, EXCLUSIVE, graph.raw_weight_lr);
+                         WRITE_ONLY, EXCLUSIVE, graph.raw_weight_lr,
+                         MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
@@ -227,14 +230,16 @@ ScanTask::ScanTask(const Graph &graph)
   // regions[0]: degrees
   {
     RegionRequirement rr(graph.degree_lr, 0/*projection id*/,
-                         WRITE_ONLY, EXCLUSIVE, graph.degree_lr);
+                         WRITE_ONLY, EXCLUSIVE, graph.degree_lr,
+                         MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
   // regions[1]: raw_cols
   {
     RegionRequirement rr(graph.raw_col_lr, 0/*projection id*/,
-                         READ_ONLY, EXCLUSIVE, graph.raw_col_lr);
+                         READ_ONLY, EXCLUSIVE, graph.raw_col_lr,
+                         MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
@@ -374,14 +379,16 @@ InitTask::InitTask(const Graph &graph,
   // regions[4]: raw_rows
   {
     RegionRequirement rr(graph.raw_row_lp, 0/*identity*/,
-                         READ_ONLY, EXCLUSIVE, graph.raw_row_lr);
+                         READ_ONLY, EXCLUSIVE, graph.raw_row_lr,
+                         MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
   // regions[5]: raw_cols
   {
     RegionRequirement rr(graph.raw_col_lp, 0/*identity*/,
-                         READ_ONLY, EXCLUSIVE, graph.raw_col_lr);
+                         READ_ONLY, EXCLUSIVE, graph.raw_col_lr,
+                         MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
@@ -389,7 +396,8 @@ InitTask::InitTask(const Graph &graph,
   // regions[6]: degrees
   {
     RegionRequirement rr(graph.degree_lp, 0/*identity*/,
-                         READ_ONLY, EXCLUSIVE, graph.degree_lr);
+                         READ_ONLY, EXCLUSIVE, graph.degree_lr,
+                         MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
@@ -398,7 +406,8 @@ InitTask::InitTask(const Graph &graph,
   // regions[6/7]: raw_weights
   {
     RegionRequirement rr(graph.raw_weight_lp, 0/*identity*/,
-                         READ_ONLY, EXCLUSIVE, graph.raw_weight_lr);
+                         READ_ONLY, EXCLUSIVE, graph.raw_weight_lr,
+                         MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
