@@ -137,8 +137,8 @@ Memory LuxMapper::default_policy_select_target_memory(MapperContext ctx,
                                                       Processor target_proc,
                                                       const RegionRequirement &req)
 {
-   return DefaultMapper::default_policy_select_target_memory(
-             ctx, target_proc, req);
+  //return DefaultMapper::default_policy_select_target_memory(
+  //           ctx, target_proc, req);
   if (req.tag == MAP_TO_FB_MEMORY) {
     assert(memFBs.find(target_proc) != memFBs.end());
     return memFBs[target_proc];

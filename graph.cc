@@ -229,7 +229,7 @@ ScanTask::ScanTask(const Graph &graph)
 {
   // regions[0]: degrees
   {
-    RegionRequirement rr(graph.degree_lr, 0/*projection id*/,
+    RegionRequirement rr(graph.degree_lr,
                          WRITE_ONLY, EXCLUSIVE, graph.degree_lr,
                          MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
@@ -237,7 +237,7 @@ ScanTask::ScanTask(const Graph &graph)
   }
   // regions[1]: raw_cols
   {
-    RegionRequirement rr(graph.raw_col_lr, 0/*projection id*/,
+    RegionRequirement rr(graph.raw_col_lr,
                          READ_ONLY, EXCLUSIVE, graph.raw_col_lr,
                          MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
