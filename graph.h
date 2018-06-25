@@ -20,6 +20,7 @@
 #include "app.h"
 #include "legion.h"
 #include <unistd.h>
+#include <cuda_runtime.h>
 
 using namespace Legion;
 template<typename FT, int N, typename T = coord_t> using AccessorRO = FieldAccessor<READ_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
@@ -27,6 +28,7 @@ template<typename FT, int N, typename T = coord_t> using AccessorRW = FieldAcces
 template<typename FT, int N, typename T = coord_t> using AccessorWO = FieldAccessor<WRITE_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
 
 #define MAX_FILE_LEN 64
+#define MAX_NUM_PARTS 64
 #define FILE_HEADER_SIZE (sizeof(E_ID) + sizeof(V_ID))
 #define MAP_TO_FB_MEMORY 0xABCD0000
 #define MAP_TO_ZC_MEMORY 0xABCE0000
@@ -37,6 +39,9 @@ enum {
   SCAN_TASK_ID,
   INIT_TASK_ID,
   APP_TASK_ID,
+  PUSH_LOAD_TASK_ID,
+  PUSH_INIT_TASK_ID,
+  PUSH_APP_TASK_ID,
 };
 
 enum FieldIDs {
@@ -50,6 +55,9 @@ public:
   int numParts;
   V_ID nv;
   E_ID ne;
+  V_ID frontierSize; // maximum allowed size for frontier queues
+  V_ID rowLeft[MAX_NUM_PARTS], rowRight[MAX_NUM_PARTS];
+  V_ID fqLeft[MAX_NUM_PARTS], fqRight[MAX_NUM_PARTS];
   LogicalRegion row_ptr_lr;
   LogicalPartition row_ptr_lp;
   LogicalRegion raw_row_lr;
@@ -64,6 +72,8 @@ public:
   LogicalPartition degree_lp;
   LogicalRegion raw_weight_lr;
   LogicalPartition raw_weight_lp;
+  LogicalRegion frontier_lr[2];
+  LogicalPartition frontier_lp[2];
   LogicalRegion dist_lr[2];
   LogicalPartition dist_lp[2];
 };
@@ -74,8 +84,22 @@ public:
   V_ID myInVtxs;
   V_ID nv;
   E_ID ne;
+  char *oldFqFb, *newFqFb;
   Vertex *oldPrFb, *newPrFb;
+  cudaStream_t streams[MAX_NUM_PARTS];
 };
+
+struct FrontierHeader
+{
+  static const V_ID DENSE_BITMAP = 0x12345678;
+  static const V_ID SPARSE_QUEUE = 0x87654321;
+  V_ID numNodes;
+  V_ID type;
+};
+
+// ----------------------------------------------------------------------------
+// Tasks for Pull-based Execution
+// ----------------------------------------------------------------------------
 
 class LoadTask : public IndexLauncher
 {
@@ -124,4 +148,49 @@ void app_task_impl(const Task *task,
 GraphPiece init_task_impl(const Task *task,
                           const std::vector<PhysicalRegion> &regions,
                           Context ctx, Runtime *runtime);
+
+// ----------------------------------------------------------------------------
+// Tasks for Pull-based Execution
+// ----------------------------------------------------------------------------
+class PushLoadTask : public IndexLauncher
+{
+public:
+  PushLoadTask(const Graph &graph,
+               const IndexSpaceT<1> &domain,
+               const ArgumentMap &arg_map,
+               std::string &fn);
+};
+
+class PushInitTask : public IndexLauncher
+{
+public:
+  PushInitTask(const Graph &graph,
+               const IndexSpaceT<1> &domain,
+               const ArgumentMap &arg_map);
+};
+
+class PushAppTask : public IndexLauncher
+{
+public:
+  PushAppTask(const Graph &graph,
+              const IndexSpaceT<1> &domain,
+              const ArgumentMap &arg_map,
+              int iteration);
+};
+
+void push_load_task_impl(const Task *task,
+                         const std::vector<PhysicalRegion> &regions,
+                         Context ctx, Runtime *runtime);
+
+void push_app_task_impl(const Task *task,
+                        const std::vector<PhysicalRegion> &regions,
+                        Context ctx, Runtime *runtime);
+
+GraphPiece push_init_task_impl(const Task *task,
+                               const std::vector<PhysicalRegion> &regions,
+                               Context ctx, Runtime *runtime);
+
+
+
+
 #endif

@@ -311,6 +311,7 @@ void load_task_impl(const Task *task,
     fread(raw_weights, sizeof(WeightType), (size_t)(colRight - colLeft + 1), fd);
   assert(fread_ret == colRight - colLeft + 1);
 #endif
+  fclose(fd);
 }
 
 void scan_task_impl(const Task *task,

@@ -12,8 +12,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef _PAGERANK_H_
-#define _PAGERANK_H_
+#ifndef _PAGERANK_APP_H_
+#define _PAGERANK_APP_H_
 
 #include <cstdint>
 #define VERTEX_DEGREE
