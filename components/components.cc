@@ -41,6 +41,7 @@ void top_level_task(const Task *task,
     if (numGPU <= 0) {
       fprintf(stderr, "numGPU(%d) must be greater than zero.\n",
               numGPU);
+      return;
     }
   }
 
@@ -66,7 +67,7 @@ void top_level_task(const Task *task,
   int iteration = 0;
   log_cc.print("Start Connected Components computation...");
   double ts_start = Realm::Clock::current_time_in_microseconds();
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < 2; i++) {
     iteration = i;
     PushAppTask app_task(graph, task_is, local_args, iteration);
     fm = runtime->execute_index_space(ctx, app_task);
@@ -114,7 +115,6 @@ int main(int argc, char **argv)
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
     Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
   }
-  // Load Task
   {
     TaskVariantRegistrar registrar(PUSH_LOAD_TASK_ID, "load_task (push)");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
@@ -363,8 +363,6 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     runtime->attach_name(row_ptr_fs, "row_ptrs(NodeStruct)");
     FieldSpace raw_row_fs = runtime->create_field_space(ctx);
     runtime->attach_name(raw_row_fs, "raw_rows(E_ID)");
-    FieldSpace in_vtx_fs = runtime->create_field_space(ctx);
-    runtime->attach_name(in_vtx_fs, "in_vtxs(V_ID)");
     FieldSpace col_idx_fs = runtime->create_field_space(ctx);
     runtime->attach_name(col_idx_fs, "col_idxs(EdgeStruct)");
     FieldSpace raw_col_fs = runtime->create_field_space(ctx);
@@ -377,7 +375,6 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     // Allocate fields
     alloc_fs<NodeStruct>(ctx, runtime, row_ptr_fs);
     alloc_fs<E_ID>(ctx, runtime, raw_row_fs);
-    alloc_fs<V_ID>(ctx, runtime, in_vtx_fs);
     alloc_fs<EdgeStruct>(ctx, runtime, col_idx_fs);
     alloc_fs<V_ID>(ctx, runtime, raw_col_fs);
     alloc_fs<char>(ctx, runtime, frontier_fs);
@@ -421,8 +418,8 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
       rowLeft[count] = left_bound;
       rowRight[count] = v;
       fqLeft[count] = frontierSize;
-      // 5 extra slots to handle concer cases
-      V_ID mySlots = (rowRight[count] - rowLeft[count]) / SPARSE_THRESHOLD + 5;
+      // 10 extra slots to handle concer cases
+      V_ID mySlots = (rowRight[count] - rowLeft[count]) / SPARSE_THRESHOLD + 10;
       frontierSize += sizeof(FrontierHeader) + mySlots * sizeof(V_ID);
       fqRight[count] = frontierSize - 1;
       count++;
@@ -435,12 +432,13 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     rowLeft[count] = left_bound;
     rowRight[count] = nv - 1;
     fqLeft[count] = frontierSize;
-    V_ID mySlots = (rowRight[count] - rowLeft[count]) / SPARSE_THRESHOLD + 5;
+    // 10 extra slots to handle concer cases
+    V_ID mySlots = (rowRight[count] - rowLeft[count]) / SPARSE_THRESHOLD + 10;
     frontierSize += sizeof(FrontierHeader) + mySlots * sizeof(V_ID);
     fqRight[count] = frontierSize - 1;
     count++;
   }
-  // Make frontier queue logial regions
+  // Make logial regions for frontier queues
   Rect<1> frontier_rect(Point<1>(0), Point<1>(frontierSize-1));
   IndexSpaceT<1> frontier_is =
     runtime->create_index_space(ctx, frontier_rect);
@@ -468,12 +466,28 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
                                         pvt_vtx_coloring, true);
     assert(runtime->is_index_partition_disjoint(ctx, vtx_ip));
     assert(runtime->is_index_partition_complete(ctx, vtx_ip));
-    row_ptr_lp = runtime->get_logical_partition(ctx, row_ptr_lr, vtx_ip);
     raw_row_lp = runtime->get_logical_partition(ctx, raw_row_lr, vtx_ip);
     for (int i = 0; i < 2; i++)
     {
       dist_lp[i] = runtime->get_logical_partition(ctx, dist_lr[i], vtx_ip);
     }
+  }
+  // Next, we partition row_ptrs
+  {
+    DomainColoring row_coloring;
+    for (int color = 0; color < numParts; color++)
+    {
+      LegionRuntime::Arrays::Rect<1> subrect(
+          LegionRuntime::Arrays::Point<1>(color * nv),
+          LegionRuntime::Arrays::Point<1>((color + 1) * nv - 1));
+      row_coloring[color] = Domain::from_rect<1>(subrect);
+    }
+    IndexPartition row_ip
+        = runtime->create_index_partition(ctx, row_is, color_domain,
+                                          row_coloring, true);
+    assert(runtime->is_index_partition_disjoint(ctx, row_ip));
+    assert(runtime->is_index_partition_complete(ctx, row_ip));
+    row_ptr_lp = runtime->get_logical_partition(ctx, row_ptr_lr, row_ip);
   }
   // Second, we partition the frontiers
   {
@@ -514,8 +528,6 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
         runtime->get_logical_partition(ctx, col_idx_lr, col_idx_ip);
     raw_col_lp =
         runtime->get_logical_partition(ctx, raw_col_lr, col_idx_ip);
-    in_vtx_lp =
-        runtime->get_logical_partition(ctx, in_vtx_lr, col_idx_ip);
   }
   free(raw_rows);
 }
