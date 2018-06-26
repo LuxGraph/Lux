@@ -109,7 +109,7 @@ void cc_kernel(V_ID inRowLeft,
       NodeStruct ns = row_ptrs[curVtx];
       E_ID start_col_idx, end_col_idx = ns.index;
       if (curVtx == 0)
-        start_col_idx = 0;
+        start_col_idx = colLeft;
       else
         start_col_idx = row_ptrs[curVtx - 1].index;
       if (oldDense) {
@@ -135,39 +135,51 @@ void cc_kernel(V_ID inRowLeft,
 
     E_ID done = 0;
     int srcIdx = 0;
-    while (totalNumEdges > 0) {
-      __syncthreads();
-      if (threadIdx.x < totalNumEdges) {
-        while (srcIdx + 1 < CUDA_NUM_THREADS && done + threadIdx.x >= offset[srcIdx + 1])
-          srcIdx ++;
-        E_ID colIdx = edgeOffset[srcIdx] + done + threadIdx.x
-                    - offset[srcIdx] - colLeft;
-        if (newDense)
+    if (newDense) {
+      while (totalNumEdges > 0) {
+        __syncthreads();
+        if (threadIdx.x < totalNumEdges) {
+          while (srcIdx + 1 < CUDA_NUM_THREADS && done + threadIdx.x >= offset[srcIdx + 1])
+            srcIdx ++;
+          E_ID colIdx = edgeOffset[srcIdx] + done + threadIdx.x
+                      - offset[srcIdx] - colLeft;
           process_edge_dense(col_idxs, my_new_pr_fb, colIdx,
                              myRowLeft, srcLabels[srcIdx]);
-        else {
-          E_ID myCnt = 0, offset, totalCnt;
-          V_ID dstVtx;
+        }
+        done += CUDA_NUM_THREADS;
+        totalNumEdges -= (totalNumEdges > CUDA_NUM_THREADS)
+                         ? CUDA_NUM_THREADS : totalNumEdges;
+      }
+    } else {
+      while (totalNumEdges > 0) {
+        E_ID myCnt = 0, myOffset, totalCnt;
+        V_ID dstVtx;
+        __syncthreads();
+        if (threadIdx.x < totalNumEdges) {
+          while (srcIdx + 1 < CUDA_NUM_THREADS && done + threadIdx.x >= offset[srcIdx + 1])
+            srcIdx ++;
+          E_ID colIdx = edgeOffset[srcIdx] + done + threadIdx.x
+                      - offset[srcIdx] - colLeft;
           if (process_edge_sparse(col_idxs, my_old_pr_fb, my_new_pr_fb,
-                                  colIdx, myRowLeft, srcLabels[srcIdx], dstVtx))
+                                   colIdx, myRowLeft, srcLabels[srcIdx], dstVtx))
           {
             myCnt = 1;
           }
-          __syncthreads();
-          BlockScan(temp_storage).ExclusiveSum(myCnt, offset, totalCnt);
-          if (threadIdx.x == 0) {
-            queueIdx = atomicAdd(numNodes, (V_ID)totalCnt);
-          }
-          __syncthreads();
-          if (myCnt == 1) {
-            if (queueIdx + offset < maxNumNodes)
-              newQueue[queueIdx + offset] = dstVtx;
-          }
         }
+        __syncthreads();
+        BlockScan(temp_storage).ExclusiveSum(myCnt, myOffset, totalCnt);
+        if (threadIdx.x == 0) {
+          queueIdx = atomicAdd(numNodes, (V_ID)totalCnt);
+        }
+        __syncthreads();
+        if (myCnt == 1) {
+          if (queueIdx + myOffset < maxNumNodes)
+            newQueue[queueIdx + myOffset] = dstVtx;
+        }
+        done += CUDA_NUM_THREADS;
+        totalNumEdges -= (totalNumEdges > CUDA_NUM_THREADS)
+                         ? CUDA_NUM_THREADS : totalNumEdges;
       }
-      done += CUDA_NUM_THREADS;
-      totalNumEdges -= (totalNumEdges > CUDA_NUM_THREADS)
-                       ? CUDA_NUM_THREADS : totalNumEdges;
     }
   }
 }
@@ -184,9 +196,10 @@ void bitmap_kernel(V_ID rowLeft,
   FrontierHeader* header = (FrontierHeader*) new_fq_fb;
   char* bitmap = new_fq_fb + sizeof(FrontierHeader);
   V_ID *numNodes = &(header->numNodes);
-  for (V_ID idx = blockIdx.x * blockDim.x;
-       idx * 8 + rowLeft <= rowRight; idx += blockDim.x * gridDim.x)
+  for (V_ID blkStart = blockIdx.x * blockDim.x;
+       blkStart * 8 + rowLeft <= rowRight; blkStart += blockDim.x * gridDim.x)
   {
+    V_ID idx = blkStart + threadIdx.x;
     char bit = 0;
     V_ID cnt = 0, totalCnt = 0;
     for (int i = 0; i < 8; i ++) {
@@ -215,7 +228,7 @@ void convert_d2s_kernel(V_ID rowLeft,
   typedef cub::BlockScan<V_ID, CUDA_NUM_THREADS> BlockScan;
   __shared__ BlockScan::TempStorage temp_storage;
   __shared__ V_ID queueIdx;
-  char* oldBitmap = old_fq_fb + sizeof(FrontierHeader);
+  const char* oldBitmap = (const char*) old_fq_fb + sizeof(FrontierHeader);
   V_ID* newQueue = (V_ID*)(new_fq_fb + sizeof(FrontierHeader));
   FrontierHeader* header = (FrontierHeader*) new_fq_fb;
   V_ID* numNodes = &(header->numNodes);
@@ -235,11 +248,12 @@ void convert_d2s_kernel(V_ID rowLeft,
     if (threadIdx.x == 0)
       queueIdx = atomicAdd(numNodes, totalCnt);
     __syncthreads();
-    newQueue[queueIdx + offset] = curVtx;
+    if (cnt == 1)
+      newQueue[queueIdx + offset] = curVtx;
   }
 }
 
-void push_app_task_impl(const Task *task,
+V_ID push_app_task_impl(const Task *task,
                         const std::vector<PhysicalRegion> &regions,
                         Context ctx, Runtime *runtime)
 {
@@ -321,10 +335,13 @@ void push_app_task_impl(const Task *task,
                     old_header->numNodes * sizeof(V_ID) + sizeof(FrontierHeader),
                     cudaMemcpyHostToDevice, piece->streams[i]));
       int numBlocks = GET_BLOCKS(old_header->numNodes);
-      cc_kernel<<<numBlocks, CUDA_NUM_THREADS, 0, piece->streams[i]>>>(
-          0, old_header->numNodes - 1, rowLeft, colLeft,
-          row_ptrs, col_idxs, (char*)old_header, piece->newFqFb, old_pr,
-          piece->oldPrFb, piece->newPrFb, false/*old_dense*/, denseFq, maxNumNodes);
+      // Avoid launching empty kernel
+      if (numBlocks > 0) {
+        cc_kernel<<<numBlocks, CUDA_NUM_THREADS, 0, piece->streams[i]>>>(
+            0, old_header->numNodes - 1, rowLeft, colLeft,
+            row_ptrs, col_idxs, (char*)old_header, piece->newFqFb, old_pr,
+            piece->oldPrFb, piece->newPrFb, false/*old_dense*/, denseFq, maxNumNodes);
+      }
     } else {
       // Must be either dense or sparse frontier queue
       assert(false);
@@ -336,23 +353,23 @@ void push_app_task_impl(const Task *task,
     bitmap_kernel<<<numBlocks, CUDA_NUM_THREADS>>>(
         rowLeft, rowRight, piece->newFqFb, piece->oldPrFb, piece->newPrFb);
     checkCUDA(cudaDeviceSynchronize());
-    FrontierHeader* header = (FrontierHeader*) piece->newFqFb;
-
-    if (header->numNodes < maxNumNodes) {
+    checkCUDA(cudaMemcpy(newFqHeader, piece->newFqFb, sizeof(FrontierHeader),
+                         cudaMemcpyDeviceToHost));
+    if (newFqHeader->numNodes < maxNumNodes) {
       // copy piece->newFqFb to piece->oldFqFb
-      checkCUDA(cudaMemcpy(piece->oldFqFb, piece->newFqFb,
+      checkCUDA(cudaMemcpyAsync(piece->oldFqFb, piece->newFqFb,
                            fqRight - fqLeft + 1,
                            cudaMemcpyDeviceToDevice));
+      checkCUDA(cudaMemsetAsync(piece->newFqFb, 0, sizeof(FrontierHeader)));
       numBlocks = GET_BLOCKS(rowRight - rowLeft + 1);
       denseFq = false;
-      header->numNodes = 0;
       convert_d2s_kernel<<<numBlocks, CUDA_NUM_THREADS>>>(
           rowLeft, rowRight, piece->oldFqFb, piece->newFqFb);
     }
   } else {
-    FrontierHeader* header = (FrontierHeader*) piece->newFqFb;
-    V_ID numNodes = header->numNodes;
-    if (numNodes >= maxNumNodes) {
+    checkCUDA(cudaMemcpy(newFqHeader, piece->newFqFb, sizeof(FrontierHeader),
+                         cudaMemcpyDeviceToHost));
+    if (newFqHeader->numNodes >= maxNumNodes) {
       denseFq = true;
       int numBlocks = GET_BLOCKS((rowRight - rowLeft) / 8 + 1);
       bitmap_kernel<<<numBlocks, CUDA_NUM_THREADS>>>(
@@ -370,6 +387,9 @@ void push_app_task_impl(const Task *task,
                        cudaMemcpyDeviceToHost));
   newFqHeader->type = denseFq ? FrontierHeader::DENSE_BITMAP
                               : FrontierHeader::SPARSE_QUEUE;
+  return newFqHeader->numNodes;
+  //for (V_ID n = 0; n < 10; n++) printf("oldPr[%u]: %u\n", n + rowLeft, old_pr[n + rowLeft]);
+  //for (V_ID n = 0; n < 10; n++) printf("newPr[%u]: %u\n", n + rowLeft, new_pr[n]);
 }
 
 static inline bool compareLess(const EdgeStruct& a, const EdgeStruct& b)

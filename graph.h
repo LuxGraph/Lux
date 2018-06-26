@@ -182,7 +182,7 @@ void push_load_task_impl(const Task *task,
                          const std::vector<PhysicalRegion> &regions,
                          Context ctx, Runtime *runtime);
 
-void push_app_task_impl(const Task *task,
+V_ID push_app_task_impl(const Task *task,
                         const std::vector<PhysicalRegion> &regions,
                         Context ctx, Runtime *runtime);
 

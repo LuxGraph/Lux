@@ -67,10 +67,17 @@ void top_level_task(const Task *task,
   int iteration = 0;
   log_cc.print("Start Connected Components computation...");
   double ts_start = Realm::Clock::current_time_in_microseconds();
-  for (int i = 0; i < 2; i++) {
-    iteration = i;
+  while (true) {
     PushAppTask app_task(graph, task_is, local_args, iteration);
     fm = runtime->execute_index_space(ctx, app_task);
+    fm.wait_all_results();
+    bool halt = true;
+    for (PointInRectIterator<1> it(task_rect); it(); it++) {
+      V_ID numNodes = fm.get_result<V_ID>(*it);
+      if (numNodes > 0) halt = false;
+    }
+    if (halt || iteration > 50) break;
+    iteration ++;
   }
   fm.wait_all_results();
   double ts_end = Realm::Clock::current_time_in_microseconds();
@@ -132,7 +139,7 @@ int main(int argc, char **argv)
     TaskVariantRegistrar registrar(PUSH_APP_TASK_ID, "app_task (push)");
     registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
     registrar.set_leaf();
-    Runtime::preregister_task_variant<push_app_task_impl>(
+    Runtime::preregister_task_variant<V_ID, push_app_task_impl>(
         registrar, "app_task (push)");
   }
   Runtime::add_registration_callback(update_mappers);
