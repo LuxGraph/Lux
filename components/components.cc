@@ -76,7 +76,7 @@ void top_level_task(const Task *task,
       V_ID numNodes = fm.get_result<V_ID>(*it);
       if (numNodes > 0) halt = false;
     }
-    if (halt || iteration > 50) break;
+    if (halt) break;
     iteration ++;
   }
   fm.wait_all_results();

@@ -132,7 +132,6 @@ void cc_kernel(V_ID inRowLeft,
     offset[threadIdx.x] = scratchOffset;
     edgeOffset[threadIdx.x] = myOffset;
     __syncthreads();
-
     E_ID done = 0;
     int srcIdx = 0;
     if (newDense) {
@@ -295,6 +294,8 @@ V_ID push_app_task_impl(const Task *task,
   V_ID rowLeft = rect_new_pr.lo[0], rowRight = rect_new_pr.hi[0];
   E_ID colLeft = rect_col_idx.lo[0], colRight = rect_col_idx.hi[0];
   V_ID fqLeft = rect_new_fq.lo[0], fqRight = rect_new_fq.hi[0];
+
+  double ts_start = Realm::Clock::current_time_in_microseconds();
   // Copy piece->newPrFb to piece->oldPrFb
   checkCUDA(cudaMemcpy(piece->oldPrFb, piece->newPrFb,
                        sizeof(Vertex) * (rowRight - rowLeft + 1),
@@ -316,6 +317,7 @@ V_ID push_app_task_impl(const Task *task,
   V_ID maxNumNodes = (fqRight - fqLeft + 1 - sizeof(FrontierHeader)) / sizeof(V_ID);
   // Initialize new frontier queue
   checkCUDA(cudaMemset(piece->newFqFb, 0, sizeof(FrontierHeader)));
+  double cp0 = Realm::Clock::current_time_in_microseconds();
   for (int i = 0; i < graph->numParts; i ++) {
     FrontierHeader* old_header = (FrontierHeader*)(old_fq + graph->fqLeft[i]);
     if (old_header->type == FrontierHeader::DENSE_BITMAP) {
@@ -348,6 +350,7 @@ V_ID push_app_task_impl(const Task *task,
     }
   }
   checkCUDA(cudaDeviceSynchronize());
+  double cp1 = Realm::Clock::current_time_in_microseconds();
   if (denseFq) {
     int numBlocks = GET_BLOCKS((rowRight - rowLeft) / 8 + 1);
     bitmap_kernel<<<numBlocks, CUDA_NUM_THREADS>>>(
@@ -376,6 +379,7 @@ V_ID push_app_task_impl(const Task *task,
           rowLeft, rowRight, piece->newFqFb, piece->oldPrFb, piece->newPrFb);
     }
   }
+  double cp2 = Realm::Clock::current_time_in_microseconds();
   // Copy piece->newFqFb to new_fq
   // Copy piece->newPrFb to new_pr
   checkCUDA(cudaDeviceSynchronize());
@@ -385,8 +389,11 @@ V_ID push_app_task_impl(const Task *task,
   checkCUDA(cudaMemcpy(new_pr, piece->newPrFb,
                        (rowRight - rowLeft + 1) * sizeof(Vertex),
                        cudaMemcpyDeviceToHost));
+  double ts_end = Realm::Clock::current_time_in_microseconds();
   newFqHeader->type = denseFq ? FrontierHeader::DENSE_BITMAP
                               : FrontierHeader::SPARSE_QUEUE;
+  printf("rowLeft(%u) numNodes(%u) initTime(%.0lf) compTime(%.0lf) fqTime(%.0lf) xferTime(%.0lf)\n",
+         rowLeft, newFqHeader->numNodes, cp0 - ts_start, cp1 - cp0, cp2 - cp1, ts_end - cp2);
   return newFqHeader->numNodes;
   //for (V_ID n = 0; n < 10; n++) printf("oldPr[%u]: %u\n", n + rowLeft, old_pr[n + rowLeft]);
   //for (V_ID n = 0; n < 10; n++) printf("newPr[%u]: %u\n", n + rowLeft, new_pr[n]);
