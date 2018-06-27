@@ -38,11 +38,12 @@ void process_edge_dense(const EdgeStruct* colIdxs,
                         V_ID myRowLeft,
                         Vertex newLabel)
 {
-  EdgeStruct es = cub::ThreadLoad<cub::LOAD_CG>(colIdxs + colIdx);
-  Vertex oldLabel = cub::ThreadLoad<cub::LOAD_CG>(myNewPrFb + es.dst - myRowLeft);
-  if (newLabel < oldLabel) {
-    atomicMin(myNewPrFb + es.dst - myRowLeft, newLabel);
-  }
+  EdgeStruct dst = cub::ThreadLoad<cub::LOAD_CG>(colIdxs + colIdx);
+  //Vertex oldLabel = cub::ThreadLoad<cub::LOAD_CG>(myNewPrFb + dst - myRowLeft);
+  //if (newLabel < oldLabel) {
+    //atomicMin(&myNewPrFb[dst - myRowLeft], newLabel);
+    atomicMin(myNewPrFb + dst - myRowLeft, newLabel);
+  //}
 }
 
 __device__ __forceinline__
@@ -55,7 +56,7 @@ bool process_edge_sparse(const EdgeStruct* colIdxs,
                          V_ID &dstVtx)
 {
   EdgeStruct es = cub::ThreadLoad<cub::LOAD_CG>(colIdxs + colIdx);
-  dstVtx = es.dst;
+  dstVtx = es;
   Vertex oldLabel = cub::ThreadLoad<cub::LOAD_CG>(myNewPrFb + dstVtx - myRowLeft);
   if (newLabel < oldLabel) {
     Vertex lastLabel = cub::ThreadLoad<cub::LOAD_CG>(myOldPrFb + dstVtx - myRowLeft);
@@ -136,7 +137,6 @@ void cc_kernel(V_ID inRowLeft,
     int srcIdx = 0;
     if (newDense) {
       while (totalNumEdges > 0) {
-        __syncthreads();
         if (threadIdx.x < totalNumEdges) {
           while (srcIdx + 1 < CUDA_NUM_THREADS && done + threadIdx.x >= offset[srcIdx + 1])
             srcIdx ++;
@@ -252,6 +252,24 @@ void convert_d2s_kernel(V_ID rowLeft,
   }
 }
 
+__global__
+void copy_kernel(V_ID numNodes,
+                 V_ID rowLeft,
+                 char* new_fq_fb,
+                 Vertex* new_pr_fb,
+                 Vertex* new_pr_zc)
+{
+  V_ID* newQueue = (V_ID*)(new_fq_fb + sizeof(FrontierHeader));
+  for (V_ID idx = blockIdx.x * blockDim.x + threadIdx.x;
+       idx < numNodes; idx += blockDim.x * gridDim.x)
+  {
+    if (idx < numNodes) {
+      V_ID curVtx = newQueue[idx];
+      new_pr_zc[curVtx - rowLeft] = new_pr_fb[curVtx - rowLeft];
+    }
+  }
+}
+
 V_ID push_app_task_impl(const Task *task,
                         const std::vector<PhysicalRegion> &regions,
                         Context ctx, Runtime *runtime)
@@ -327,9 +345,11 @@ V_ID push_app_task_impl(const Task *task,
                     + sizeof(FrontierHeader),
                     cudaMemcpyHostToDevice, piece->streams[i]));
       int numBlocks = GET_BLOCKS(graph->rowRight[i] - graph->rowLeft[i] + 1);
+      //printf("row_ptrs(%llx) col_idxs(%llx) oldFqFb(%llx) newFqFb(%llx) oldPrFb(%llx) newPrFb(%llx) oldPrZC(%llx) oldFqZC(%llx)\n",
+      //       row_ptrs, col_idxs, piece->oldFqFb+graph->fqLeft[i], piece->newFqFb, piece->oldPrFb, piece->newPrFb, old_pr, old_fq);
       cc_kernel<<<numBlocks, CUDA_NUM_THREADS, 0, piece->streams[i]>>>(
           graph->rowLeft[i], graph->rowRight[i], rowLeft, colLeft,
-          row_ptrs, col_idxs, (char*)old_header, piece->newFqFb, old_pr,
+          row_ptrs, col_idxs, piece->oldFqFb + graph->fqLeft[i], piece->newFqFb, old_pr,
           piece->oldPrFb, piece->newPrFb, true/*old_dense*/, denseFq, maxNumNodes);
     } else if (old_header->type == FrontierHeader::SPARSE_QUEUE) {
       checkCUDA(cudaMemcpyAsync(piece->oldFqFb + graph->fqLeft[i],
@@ -341,7 +361,7 @@ V_ID push_app_task_impl(const Task *task,
       if (numBlocks > 0) {
         cc_kernel<<<numBlocks, CUDA_NUM_THREADS, 0, piece->streams[i]>>>(
             0, old_header->numNodes - 1, rowLeft, colLeft,
-            row_ptrs, col_idxs, (char*)old_header, piece->newFqFb, old_pr,
+            row_ptrs, col_idxs, piece->oldFqFb + graph->fqLeft[i], piece->newFqFb, old_pr,
             piece->oldPrFb, piece->newPrFb, false/*old_dense*/, denseFq, maxNumNodes);
       }
     } else {
@@ -368,6 +388,8 @@ V_ID push_app_task_impl(const Task *task,
       denseFq = false;
       convert_d2s_kernel<<<numBlocks, CUDA_NUM_THREADS>>>(
           rowLeft, rowRight, piece->oldFqFb, piece->newFqFb);
+      checkCUDA(cudaMemcpyAsync(newFqHeader, piece->newFqFb, sizeof(FrontierHeader),
+                           cudaMemcpyDeviceToHost));
     }
   } else {
     checkCUDA(cudaMemcpy(newFqHeader, piece->newFqFb, sizeof(FrontierHeader),
@@ -379,16 +401,29 @@ V_ID push_app_task_impl(const Task *task,
           rowLeft, rowRight, piece->newFqFb, piece->oldPrFb, piece->newPrFb);
     }
   }
-  double cp2 = Realm::Clock::current_time_in_microseconds();
   // Copy piece->newFqFb to new_fq
   // Copy piece->newPrFb to new_pr
   checkCUDA(cudaDeviceSynchronize());
-  checkCUDA(cudaMemcpy(new_fq, piece->newFqFb,
-                       rect_new_fq.hi[0] - rect_new_fq.lo[0] + 1,
-                       cudaMemcpyDeviceToHost));
-  checkCUDA(cudaMemcpy(new_pr, piece->newPrFb,
-                       (rowRight - rowLeft + 1) * sizeof(Vertex),
-                       cudaMemcpyDeviceToHost));
+  double cp2 = Realm::Clock::current_time_in_microseconds();
+  if (denseFq) {
+    checkCUDA(cudaMemcpy(new_fq, piece->newFqFb,
+                         rect_new_fq.hi[0] - rect_new_fq.lo[0] + 1,
+                         cudaMemcpyDeviceToHost));
+    checkCUDA(cudaMemcpy(new_pr, piece->newPrFb,
+                         (rowRight - rowLeft + 1) * sizeof(Vertex),
+                         cudaMemcpyDeviceToHost));
+  } else {
+    checkCUDA(cudaMemcpy(new_fq + sizeof(FrontierHeader),
+                         piece->newFqFb + sizeof(FrontierHeader),
+                         sizeof(Vertex) * newFqHeader->numNodes,
+                         cudaMemcpyDeviceToHost));
+    int numBlocks = GET_BLOCKS(newFqHeader->numNodes);
+    if (numBlocks > 0) {
+      copy_kernel<<<numBlocks, CUDA_NUM_THREADS>>>(
+          newFqHeader->numNodes, rowLeft, piece->newFqFb, piece->newPrFb, new_pr);
+    }
+  }
+  checkCUDA(cudaDeviceSynchronize());
   double ts_end = Realm::Clock::current_time_in_microseconds();
   newFqHeader->type = denseFq ? FrontierHeader::DENSE_BITMAP
                               : FrontierHeader::SPARSE_QUEUE;
@@ -399,7 +434,7 @@ V_ID push_app_task_impl(const Task *task,
   //for (V_ID n = 0; n < 10; n++) printf("newPr[%u]: %u\n", n + rowLeft, new_pr[n]);
 }
 
-static inline bool compareLess(const EdgeStruct& a, const EdgeStruct& b)
+static inline bool compareLess(const EdgeStruct2& a, const EdgeStruct2& b)
 {
   return a.src < b.src;
 }
@@ -445,7 +480,7 @@ GraphPiece push_init_task_impl(const Task *task,
   const V_ID* raw_cols = acc_raw_cols.ptr(rect_raw_cols);
   V_ID rowLeft = rect_raw_rows.lo[0], rowRight = rect_raw_rows.hi[0];
   E_ID colLeft = rect_col_idx.lo[0], colRight = rect_col_idx.hi[0];
-  std::vector<EdgeStruct> edges(colRight - colLeft + 1);
+  std::vector<EdgeStruct2> edges(colRight - colLeft + 1);
   E_ID startColIdx = colLeft;
   for (V_ID n = rowLeft; n <= rowRight; n++) {
     E_ID endColIdx = raw_rows[n - rowLeft];
@@ -467,6 +502,8 @@ GraphPiece push_init_task_impl(const Task *task,
   Realm::LocalCPUMemory* memZCImpl = (Realm::LocalCPUMemory*) memImpl;
   off_t offset = memZCImpl->alloc_bytes(sizeof(NodeStruct) * graph->nv);
   NodeStruct* nodes = (NodeStruct*) memZCImpl->get_direct_ptr(offset, 0);
+  off_t offset2 = memZCImpl->alloc_bytes(sizeof(EdgeStruct) * (colRight - colLeft + 1));
+  EdgeStruct* dsts = (EdgeStruct*) memZCImpl->get_direct_ptr(offset2, 0);
   E_ID cur = colLeft;
   for (V_ID n = 0; n < graph->nv; n++) {
     while ((cur <= colRight ) && (edges[cur - colLeft].src <= n))
@@ -475,10 +512,13 @@ GraphPiece push_init_task_impl(const Task *task,
   }
   checkCUDA(cudaMemcpy(row_ptrs, nodes, sizeof(NodeStruct) * graph->nv,
                        cudaMemcpyHostToDevice));
-  checkCUDA(cudaMemcpy(col_idxs, edges.data(),
+  for (E_ID e = colLeft; e <= colRight; e++)
+    dsts[e - colLeft] = edges[e - colLeft].dst;
+  checkCUDA(cudaMemcpy(col_idxs, dsts,
                        sizeof(EdgeStruct) * (colRight - colLeft + 1),
                        cudaMemcpyHostToDevice));
   memZCImpl->free_bytes(offset, sizeof(NodeStruct) * graph->nv);
+  memZCImpl->free_bytes(offset2, sizeof(EdgeStruct) * (colRight - colLeft + 1));
   FrontierHeader* header = (FrontierHeader*) frontier;
   header->type = FrontierHeader::DENSE_BITMAP;
   header->numNodes = 0;

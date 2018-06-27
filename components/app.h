@@ -24,7 +24,13 @@ struct NodeStruct {
   E_ID index;
 };
 
-struct EdgeStruct {
+typedef uint32_t EdgeStruct;
+
+//struct EdgeStruct {
+//  V_ID dst;
+//};
+
+struct EdgeStruct2 {
   V_ID src, dst;
 };
 

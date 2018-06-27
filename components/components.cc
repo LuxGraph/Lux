@@ -70,13 +70,13 @@ void top_level_task(const Task *task,
   while (true) {
     PushAppTask app_task(graph, task_is, local_args, iteration);
     fm = runtime->execute_index_space(ctx, app_task);
-    fm.wait_all_results();
+    //fm.wait_all_results();
     bool halt = true;
-    for (PointInRectIterator<1> it(task_rect); it(); it++) {
-      V_ID numNodes = fm.get_result<V_ID>(*it);
-      if (numNodes > 0) halt = false;
-    }
-    if (halt) break;
+    //for (PointInRectIterator<1> it(task_rect); it(); it++) {
+    //  V_ID numNodes = fm.get_result<V_ID>(*it);
+    //  if (numNodes > 0) halt = false;
+    //}
+    if (iteration > 20) break;
     iteration ++;
   }
   fm.wait_all_results();
