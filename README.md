@@ -1,26 +1,18 @@
 Lux
 ========================
-Lux is a a distributed multi-GPU system that achieves
-fast graph processing by exploiting the aggregate memory
-bandwidth of multiple GPUs and taking advantage of locality
-in the memory hierarchy of multi-GPU clusters.
-
-Organization
-------------
-The code for the Lux runtime is located in the lux/ direcory.
-The code for the applications 
+A distributed multi-GPU system for fast graph processing.
 
 Prerequisites
 -------------
 * [CUDA](https://developer.nvidia.com/cuda-zone) is used to implemented Lux.
 
-* [CUB](http://nvlabs.github.io/cub/) is used as extenral submodules for Lux's tasks.
+* [CUB](http://nvlabs.github.io/cub/) is used as external submodules for Lux's tasks.
 
 * [Legion](http://legion.stanford.edu/) is the underlying runtime for launching tasks and managing data movement.
 
-* [GASNet](http://gasnet.lbl.gov)(Optional) is used for networking.
+* (Optional)[GASNet](http://gasnet.lbl.gov) is used for inter-node communication. (see [installation instructions](http://legion.stanford.edu/gasnet/)
 
-After you have cloned Lux, use the following command lines to clone CUB and Legion:
+After you have cloned Lux, use the following command lines to clone CUB and Legion. 
 ```
 git submodule init
 git submodule update
@@ -33,15 +25,27 @@ Compilation
 # Using git to download Lux
 git clone --recursive https://github.com/LuxGraph/Lux
 ```
-* Compiling a Lux application (e.g., PageRank)
+* Compile a Lux application (e.g., PageRank):
 ```
 cd pagerank
 make clean; make -j 4
 ```
-* To build a distributed version of Lux, change pagerank/Makefile
+* To build a distributed version of Lux, set `USE_GASNET` flag and rebuild:
 ```
-USE_GASNET = 1
+make clean
+USE_GASNET=1 make -j 4
 ```
+
+Running code
+------------
+The applications take an input graph as well as several runtime flags starting with `-ll:`. For example:
+```
+./pagerank -file twitter-2010.lux -ni 10 -ll:gpu 4 -ll:fsize 12000 -ll:zsize 20000
+```
+* `-ll:gpu`: number of GPU processors to use in an execution 
+* `-ll:fsize`: size of framebuffer memory for each GPU (in MB) 
+* `-ll:zsize`: size of zero-copy memory (pinned DRAM with direct GPU access) on each node (in MB)
+* `-ni`: application-specific flag denoting the number of iterations to perform
 
 Input Format
 ------------
