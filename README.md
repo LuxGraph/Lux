@@ -73,14 +73,15 @@ More specifically, `<e(c(i-1))>`...`<e(c(i)-1)>` is the collection of all in-nei
 For weighted graphs, the weights are stored after the edge sources.
 
 Some example graphs in Lux format are as follows.
-| **Graph**                                                       |
-|-----------------------------------------------------------------|
-| [hollywood](http://sapling.stanford.edu/~zhihao/hollywood.lux)  |
-| [indochina](http://sapling.stanford.edu/~zhihao/indochina.lux)  |
-| [twitter-2010](http://sapling.stanford.edu/~zhihao/twitter.lux) |
-| [rmat27](http://sapling.stanford.edu/~zhihao/rmat.lux)          |
-| [MovieLens](http://sapling.stanford.edu/~zhihao/movielens.lux)  |
-| [NetFlix](http://sapling.stanford.edu/~zhihao/netflix.lux)      |
+| **Graph**                                                       |  **NV**     | **NE**        | **Weighted** |
+|-----------------------------------------------------------------|-------------|---------------|--------------|
+| [hollywood](http://sapling.stanford.edu/~zhihao/hollywood.lux)  | 1,139,905   | 57,515,616    |              |
+| [indochina](http://sapling.stanford.edu/~zhihao/indochina.lux)  | 7,414,866   | 194,109,311   |              |
+| [twitter-2010](http://sapling.stanford.edu/~zhihao/twitter.lux) | 41,652,230  | 1,468,365,182 |              |
+| [rmat27](http://sapling.stanford.edu/~zhihao/rmat.lux)          | 134,217,728 | 2,147,483,648 |              |
+| [MovieLens](http://sapling.stanford.edu/~zhihao/movielens.lux)  | 424,338     | 48,808,192    | Yes          |
+| [NetFlix](http://sapling.stanford.edu/~zhihao/netflix.lux)      | 497,959     | 200,961,014   | Yes          |
+|-----------------------------------------------------------------|-------------|---------------|--------------|
 
 
 Publication
