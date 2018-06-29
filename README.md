@@ -10,7 +10,7 @@ Prerequisites
 
 * [Legion](http://legion.stanford.edu/) is the underlying runtime for launching tasks and managing data movement.
 
-* (Optional)[GASNet](http://gasnet.lbl.gov) is used for inter-node communication. (see [installation instructions](http://legion.stanford.edu/gasnet/)
+* (Optional) [GASNet](http://gasnet.lbl.gov) is used for inter-node communication. (see [installation instructions](http://legion.stanford.edu/gasnet/))
 
 After you have cloned Lux, use the following command lines to clone CUB and Legion. 
 ```
@@ -40,15 +40,42 @@ Running code
 ------------
 The applications take an input graph as well as several runtime flags starting with `-ll:`. For example:
 ```
-./pagerank -file twitter-2010.lux -ni 10 -ll:gpu 4 -ll:fsize 12000 -ll:zsize 20000
+./pagerank -ll:gpu 4 -ll:fsize 12000 -ll:zsize 20000 -file twitter-2010.lux -ni 10
+./components -ll:gpu 1 -ll:fsize 6000 -ll:zsize 6000 -file indochina.lux
+./sssp -ll:gpu 2 -ll:fsize 12000 -ll:zsize 20000 -file twitter-2010.lux -start 0
 ```
 * `-ll:gpu`: number of GPU processors to use in an execution 
 * `-ll:fsize`: size of framebuffer memory for each GPU (in MB) 
 * `-ll:zsize`: size of zero-copy memory (pinned DRAM with direct GPU access) on each node (in MB)
-* `-ni`: application-specific flag denoting the number of iterations to perform
+* `-file`: path to the input graph
+* `-ni`: number of iterations to perform
+* `-start`: root vertex for SSSP
 
-Input Format
+Graph Format
 ------------
+Lux uses compressed sparse column (CSC) graph in binary format. The specific format is as follows:
+```
+<nv>
+<ne>
+<c0>
+<c1>
+...
+<c(n-1)>
+<e0>
+
+<c0>
+<c1>
+...
+<c(nv-1)>
+<e0>
+<e1>
+...
+<e(ne-1)>
+<w0>
+<w1>
+...
+<w(ne-1)>
+```
 
 
 Publication
