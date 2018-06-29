@@ -81,7 +81,6 @@ Some example graphs in Lux format are as follows.
 | [rmat27](http://sapling.stanford.edu/~zhihao/rmat.lux)          |
 | [MovieLens](http://sapling.stanford.edu/~zhihao/movielens.lux)  |
 | [NetFlix](http://sapling.stanford.edu/~zhihao/netflix.lux)      |
-|-----------------------------------------------------------------|
 
 
 Publication
