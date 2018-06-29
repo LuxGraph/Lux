@@ -73,6 +73,7 @@ More specifically, `<e(c(i-1))>`...`<e(c(i)-1)>` is the collection of all in-nei
 For weighted graphs, the weights are stored after the edge sources.
 
 Some example graphs in Lux format are as follows.
+
 | **Graph**                                                       |  **NV**     | **NE**        | **Weighted** |
 |-----------------------------------------------------------------|-------------|---------------|--------------|
 | [hollywood](http://sapling.stanford.edu/~zhihao/hollywood.lux)  | 1,139,905   | 57,515,616    |              |
