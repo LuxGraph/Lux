@@ -6,11 +6,11 @@ Prerequisites
 -------------
 * [CUDA](https://developer.nvidia.com/cuda-zone) is used to implemented Lux.
 
-* [CUB](http://nvlabs.github.io/cub/) is used as external submodules for Lux's tasks.
+* [CUB](http://nvlabs.github.io/cub/) is used as an external submodule for Lux's tasks.
 
 * [Legion](http://legion.stanford.edu/) is the underlying runtime for launching tasks and managing data movement.
 
-* (Optional) [GASNet](http://gasnet.lbl.gov) is used for inter-node communication. (see [installation instructions](http://legion.stanford.edu/gasnet/))
+* (Optional) [GASNet](http://gasnet.lbl.gov) is used for multi-node executions. (see [installation instructions](http://legion.stanford.edu/gasnet/))
 
 After you have cloned Lux, use the following command lines to clone CUB and Legion. 
 ```
