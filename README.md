@@ -70,6 +70,19 @@ Lux uses compressed sparse column (CSC) graph in binary format. The specific for
 The CSC format starts with a sequence of offsets for the vertices in the CSC format, followed by a sequence of directed edges ordered by their target vertex.
 The offset `<c(i-1)` and `<c(i)>` refer to the start and end points of a contiguous block of in-edges for vertex `i`.
 More specifically, `<e(c(i-1))>`...`<e(c(i)-1)>` is the collection of all in-neighbors for vertex `i`.
+For weighted graphs, the weights are stored after the edge sources.
+
+Some example graphs in Lux format are as follows.
+| **Graph**                                                       |
+|-----------------------------------------------------------------|
+| [hollywood](http://sapling.stanford.edu/~zhihao/hollywood.lux)  |
+| [indochina](http://sapling.stanford.edu/~zhihao/indochina.lux)  |
+| [twitter-2010](http://sapling.stanford.edu/~zhihao/twitter.lux) |
+| [rmat27](http://sapling.stanford.edu/~zhihao/rmat.lux)          |
+| [MovieLens](http://sapling.stanford.edu/~zhihao/movielens.lux)  |
+| [NetFlix](http://sapling.stanford.edu/~zhihao/netflix.lux)      |
+|-----------------------------------------------------------------|
+
 
 Publication
 -----------
