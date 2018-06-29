@@ -74,7 +74,7 @@ For weighted graphs, the weights are stored after the edge sources.
 
 Some example graphs in Lux format are as follows.
 
-| **Graph**                                                       |  **NV**     | **NE**        | **Weighted** |
+| **Graph** |  **NV** | **NE** | **Weighted** |
 |-----------------------------------------------------------------|-------------|---------------|--------------|
 | [hollywood](http://sapling.stanford.edu/~zhihao/hollywood.lux)  | 1,139,905   | 57,515,616    |              |
 | [indochina](http://sapling.stanford.edu/~zhihao/indochina.lux)  | 7,414,866   | 194,109,311   |              |
@@ -82,7 +82,6 @@ Some example graphs in Lux format are as follows.
 | [rmat27](http://sapling.stanford.edu/~zhihao/rmat.lux)          | 134,217,728 | 2,147,483,648 |              |
 | [MovieLens](http://sapling.stanford.edu/~zhihao/movielens.lux)  | 424,338     | 48,808,192    | Yes          |
 | [NetFlix](http://sapling.stanford.edu/~zhihao/netflix.lux)      | 497,959     | 200,961,014   | Yes          |
-|-----------------------------------------------------------------|-------------|---------------|--------------|
 
 
 Publication
