@@ -53,16 +53,10 @@ The applications take an input graph as well as several runtime flags starting w
 
 Graph Format
 ------------
-Lux uses compressed sparse column (CSC) graph in binary format. The specific format is as follows:
+Lux uses compressed sparse column (CSC) graph in binary format. The specific format is as follows in binary:
 ```
 <nv>
 <ne>
-<c0>
-<c1>
-...
-<c(n-1)>
-<e0>
-
 <c0>
 <c1>
 ...
@@ -71,12 +65,11 @@ Lux uses compressed sparse column (CSC) graph in binary format. The specific for
 <e1>
 ...
 <e(ne-1)>
-<w0>
-<w1>
-...
-<w(ne-1)>
 ```
-
+`<nv>` and `<ne>` denote the number of vertices and direct edges in the graph.
+The CSC format starts with a sequence of offsets for the vertices in the CSC format, followed by a sequence of directed edges ordered by their target vertex.
+The offset `<c(i-1)` and `<c(i)>` refer to the start and end points of a contiguous block of in-edges for vertex `i`.
+More specifically, `<e(c(i-1))>`...`<e(c(i)-1)>` is the collection of all in-neighbors for vertex `i`.
 
 Publication
 -----------
