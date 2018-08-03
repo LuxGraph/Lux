@@ -31,6 +31,18 @@ inline int GET_BLOCKS(const int N)
   return (ret > BLOCK_SIZE_LIMIT) ? BLOCK_SIZE_LIMIT : ret;
 }
 
+__global__
+void load_kernel(V_ID nv,
+                 Vertex* old_pr_fb,
+                 const Vertex* old_pr_zc)
+{
+  for (V_ID i = blockIdx.x * blockDim.x + threadIdx.x; i < nv;
+       i+= blockDim.x * gridDim.x)
+  {
+    old_pr_fb[i] = old_pr_zc[i];
+  }
+}
+
 __device__ __forceinline__
 void process_edge_dense(const EdgeStruct* colIdxs,
                         Vertex* myNewPrFb,
@@ -39,11 +51,11 @@ void process_edge_dense(const EdgeStruct* colIdxs,
                         Vertex newLabel)
 {
   EdgeStruct dst = cub::ThreadLoad<cub::LOAD_CG>(colIdxs + colIdx);
-  //Vertex oldLabel = cub::ThreadLoad<cub::LOAD_CG>(myNewPrFb + dst - myRowLeft);
-  //if (newLabel < oldLabel) {
+  Vertex oldLabel = cub::ThreadLoad<cub::LOAD_CG>(myNewPrFb + dst - myRowLeft);
+  if (newLabel < oldLabel) {
     //atomicMin(&myNewPrFb[dst - myRowLeft], newLabel);
     atomicMin(myNewPrFb + dst - myRowLeft, newLabel);
-  //}
+  }
 }
 
 __device__ __forceinline__
@@ -67,21 +79,69 @@ bool process_edge_sparse(const EdgeStruct* colIdxs,
   return false;
 }
 
+
 __global__
-void cc_kernel(V_ID inRowLeft,
-               V_ID inRowRight,
-               V_ID myRowLeft,
-               E_ID colLeft,
-               const NodeStruct* row_ptrs,
-               const EdgeStruct* col_idxs,
-               char* old_fq_fb,
-               char* new_fq_fb,
-               const Vertex* in_old_pr_zc,
-               Vertex* my_old_pr_fb,
-               Vertex* my_new_pr_fb,
-               bool oldDense,
-               bool newDense,
-               V_ID maxNumNodes)
+void cc_pull_kernel(V_ID rowLeft,
+                    V_ID rowRight,
+                    E_ID colLeft,
+                    const NodeStruct* row_ptrs,
+                    const EdgeStruct2* col_idxs,
+                    Vertex* old_pr_fb,
+                    Vertex* new_pr_fb)
+{
+  typedef cub::BlockScan<E_ID, CUDA_NUM_THREADS> BlockScan;
+  __shared__ BlockScan::TempStorage temp_storage;
+  __shared__ E_ID blkColStart;
+  for (V_ID blkRowStart = blockIdx.x * blockDim.x + rowLeft; blkRowStart <= rowRight;
+       blkRowStart += blockDim.x * gridDim.x)
+  {
+    E_ID myNumEdges = 0, scratchOffset, totalNumEdges = 0;
+    V_ID curVtx = blkRowStart + threadIdx.x;
+    if (curVtx <= rowRight) {
+      NodeStruct ns = row_ptrs[curVtx - rowLeft];
+      E_ID start_col_idx, end_col_idx = ns.index;
+      if (curVtx == rowLeft)
+        start_col_idx = colLeft;
+      else
+        start_col_idx = row_ptrs[curVtx - rowLeft - 1].index;
+      myNumEdges = end_col_idx - start_col_idx;
+      if (threadIdx.x == 0)
+        blkColStart = start_col_idx;
+      new_pr_fb[curVtx - rowLeft] = old_pr_fb[curVtx];
+    }
+
+    __syncthreads();
+    BlockScan(temp_storage).ExclusiveSum(myNumEdges, scratchOffset, totalNumEdges);
+    E_ID done = 0;
+    while (totalNumEdges > 0) {
+      if (threadIdx.x < totalNumEdges) {
+        EdgeStruct2 es = col_idxs[blkColStart + done + threadIdx.x - colLeft];
+        Vertex srcLabel = old_pr_fb[es.src];
+        atomicMin(new_pr_fb + es.dst - rowLeft, srcLabel);
+      }
+      done += CUDA_NUM_THREADS;
+      totalNumEdges -= (totalNumEdges > CUDA_NUM_THREADS) ? 
+                       CUDA_NUM_THREADS : totalNumEdges;
+    }
+    __syncthreads();
+  }
+}
+
+__global__
+void cc_push_kernel(V_ID inRowLeft,
+                    V_ID inRowRight,
+                    V_ID myRowLeft,
+                    E_ID colLeft,
+                    const NodeStruct* row_ptrs,
+                    const EdgeStruct* col_idxs,
+                    char* old_fq_fb,
+                    char* new_fq_fb,
+                    const Vertex* in_old_pr_zc,
+                    Vertex* my_old_pr_fb,
+                    Vertex* my_new_pr_fb,
+                    bool oldDense,
+                    bool newDense,
+                    V_ID maxNumNodes)
 {
   typedef cub::BlockScan<E_ID, CUDA_NUM_THREADS> BlockScan;
   __shared__ BlockScan::TempStorage temp_storage;
@@ -274,43 +334,54 @@ V_ID push_app_task_impl(const Task *task,
                         const std::vector<PhysicalRegion> &regions,
                         Context ctx, Runtime *runtime)
 {
-  assert(regions.size() == 6);
-  assert(task->regions.size() == 6);
+  assert(regions.size() == 8);
+  assert(task->regions.size() == 8);
   const Graph* graph = (Graph*) task->args;
   const GraphPiece *piece = (GraphPiece*) task->local_args;
 
-  const AccessorRO<NodeStruct, 1> acc_row_ptr(regions[0], FID_DATA);
-  const AccessorRO<EdgeStruct, 1> acc_col_idx(regions[1], FID_DATA);
-  const AccessorRO<char, 1> acc_old_fq(regions[2], FID_DATA);
-  const AccessorWO<char, 1> acc_new_fq(regions[3], FID_DATA);
-  const AccessorRO<Vertex, 1> acc_old_pr(regions[4], FID_DATA);
-  const AccessorWO<Vertex, 1> acc_new_pr(regions[5], FID_DATA);
-  Rect<1> rect_row_ptr = runtime->get_index_space_domain(
+  const AccessorRO<NodeStruct, 1> acc_pull_row_ptr(regions[0], FID_DATA);
+  const AccessorRO<EdgeStruct2, 1> acc_pull_col_idx(regions[1], FID_DATA);
+  const AccessorRO<NodeStruct, 1> acc_push_row_ptr(regions[2], FID_DATA);
+  const AccessorRO<EdgeStruct, 1> acc_push_col_idx(regions[3], FID_DATA);
+  const AccessorRO<char, 1> acc_old_fq(regions[4], FID_DATA);
+  const AccessorWO<char, 1> acc_new_fq(regions[5], FID_DATA);
+  const AccessorRO<Vertex, 1> acc_old_pr(regions[6], FID_DATA);
+  const AccessorWO<Vertex, 1> acc_new_pr(regions[7], FID_DATA);
+  Rect<1> rect_pull_row_ptr = runtime->get_index_space_domain(
                              ctx, task->regions[0].region.get_index_space());
-  Rect<1> rect_col_idx = runtime->get_index_space_domain(
+  Rect<1> rect_pull_col_idx = runtime->get_index_space_domain(
                              ctx, task->regions[1].region.get_index_space());
+  Rect<1> rect_push_row_ptr = runtime->get_index_space_domain(
+                             ctx, task->regions[2].region.get_index_space());
+  Rect<1> rect_push_col_idx = runtime->get_index_space_domain(
+                             ctx, task->regions[3].region.get_index_space());
   Rect<1> rect_old_fq = runtime->get_index_space_domain(
-                            ctx, task->regions[2].region.get_index_space());
-  Rect<1> rect_new_fq = runtime->get_index_space_domain(
-                            ctx, task->regions[3].region.get_index_space());
-  Rect<1> rect_old_pr = runtime->get_index_space_domain(
                             ctx, task->regions[4].region.get_index_space());
-  Rect<1> rect_new_pr = runtime->get_index_space_domain(
+  Rect<1> rect_new_fq = runtime->get_index_space_domain(
                             ctx, task->regions[5].region.get_index_space());
-  assert(acc_row_ptr.accessor.is_dense_arbitrary(rect_row_ptr));
-  assert(acc_col_idx.accessor.is_dense_arbitrary(rect_col_idx));
+  Rect<1> rect_old_pr = runtime->get_index_space_domain(
+                            ctx, task->regions[6].region.get_index_space());
+  Rect<1> rect_new_pr = runtime->get_index_space_domain(
+                            ctx, task->regions[7].region.get_index_space());
+  assert(acc_pull_row_ptr.accessor.is_dense_arbitrary(rect_pull_row_ptr));
+  assert(acc_pull_col_idx.accessor.is_dense_arbitrary(rect_pull_col_idx));
+  assert(acc_push_row_ptr.accessor.is_dense_arbitrary(rect_push_row_ptr));
+  assert(acc_push_col_idx.accessor.is_dense_arbitrary(rect_push_col_idx));
   assert(acc_old_fq.accessor.is_dense_arbitrary(rect_old_fq));
   assert(acc_new_fq.accessor.is_dense_arbitrary(rect_new_fq));
   assert(acc_old_pr.accessor.is_dense_arbitrary(rect_old_pr));
   assert(acc_new_pr.accessor.is_dense_arbitrary(rect_new_pr));
-  const NodeStruct* row_ptrs = acc_row_ptr.ptr(rect_row_ptr);
-  const EdgeStruct* col_idxs = acc_col_idx.ptr(rect_col_idx);
+  assert(rect_push_col_idx == rect_pull_col_idx);
+  const NodeStruct* pull_row_ptrs = acc_pull_row_ptr.ptr(rect_pull_row_ptr);
+  const EdgeStruct2* pull_col_idxs = acc_pull_col_idx.ptr(rect_pull_col_idx);
+  const NodeStruct* push_row_ptrs = acc_push_row_ptr.ptr(rect_push_row_ptr);
+  const EdgeStruct* push_col_idxs = acc_push_col_idx.ptr(rect_push_col_idx);
   const char* old_fq = acc_old_fq.ptr(rect_old_fq);
   char* new_fq = acc_new_fq.ptr(rect_new_fq);
   const Vertex* old_pr = acc_old_pr.ptr(rect_old_pr);
   Vertex* new_pr = acc_new_pr.ptr(rect_new_pr);
   V_ID rowLeft = rect_new_pr.lo[0], rowRight = rect_new_pr.hi[0];
-  E_ID colLeft = rect_col_idx.lo[0], colRight = rect_col_idx.hi[0];
+  E_ID colLeft = rect_pull_col_idx.lo[0], colRight = rect_pull_col_idx.hi[0];
   V_ID fqLeft = rect_new_fq.lo[0], fqRight = rect_new_fq.hi[0];
 
   double ts_start = Realm::Clock::current_time_in_microseconds();
@@ -320,8 +391,10 @@ V_ID push_app_task_impl(const Task *task,
                        cudaMemcpyDeviceToDevice));
   // Decide whether we should use sparse/dense frontier
   int denseParts = 0, sparseParts = 0;
+  V_ID oldFqSize = 0;
   for (int i = 0; i < graph->numParts; i++) {
     FrontierHeader* header = (FrontierHeader*)(old_fq + graph->fqLeft[i]);
+    oldFqSize += header->numNodes;
     if (header->type == FrontierHeader::DENSE_BITMAP)
       denseParts ++;
     else if (header->type == FrontierHeader::SPARSE_QUEUE)
@@ -336,39 +409,52 @@ V_ID push_app_task_impl(const Task *task,
   // Initialize new frontier queue
   checkCUDA(cudaMemset(piece->newFqFb, 0, sizeof(FrontierHeader)));
   double cp0 = Realm::Clock::current_time_in_microseconds();
-  for (int i = 0; i < graph->numParts; i ++) {
-    FrontierHeader* old_header = (FrontierHeader*)(old_fq + graph->fqLeft[i]);
-    if (old_header->type == FrontierHeader::DENSE_BITMAP) {
-      checkCUDA(cudaMemcpyAsync(piece->oldFqFb + graph->fqLeft[i],
-                    old_fq + graph->fqLeft[i],
-                    (graph->rowRight[i] - graph->rowLeft[i]) / 8 + 1
-                    + sizeof(FrontierHeader),
-                    cudaMemcpyHostToDevice, piece->streams[i]));
-      int numBlocks = GET_BLOCKS(graph->rowRight[i] - graph->rowLeft[i] + 1);
-      //printf("row_ptrs(%llx) col_idxs(%llx) oldFqFb(%llx) newFqFb(%llx) oldPrFb(%llx) newPrFb(%llx) oldPrZC(%llx) oldFqZC(%llx)\n",
-      //       row_ptrs, col_idxs, piece->oldFqFb+graph->fqLeft[i], piece->newFqFb, piece->oldPrFb, piece->newPrFb, old_pr, old_fq);
-      cc_kernel<<<numBlocks, CUDA_NUM_THREADS, 0, piece->streams[i]>>>(
-          graph->rowLeft[i], graph->rowRight[i], rowLeft, colLeft,
-          row_ptrs, col_idxs, piece->oldFqFb + graph->fqLeft[i], piece->newFqFb, old_pr,
-          piece->oldPrFb, piece->newPrFb, true/*old_dense*/, denseFq, maxNumNodes);
-    } else if (old_header->type == FrontierHeader::SPARSE_QUEUE) {
-      checkCUDA(cudaMemcpyAsync(piece->oldFqFb + graph->fqLeft[i],
-                    old_fq + graph->fqLeft[i],
-                    old_header->numNodes * sizeof(V_ID) + sizeof(FrontierHeader),
-                    cudaMemcpyHostToDevice, piece->streams[i]));
-      int numBlocks = GET_BLOCKS(old_header->numNodes);
-      // Avoid launching empty kernel
-      if (numBlocks > 0) {
-        cc_kernel<<<numBlocks, CUDA_NUM_THREADS, 0, piece->streams[i]>>>(
-            0, old_header->numNodes - 1, rowLeft, colLeft,
-            row_ptrs, col_idxs, piece->oldFqFb + graph->fqLeft[i], piece->newFqFb, old_pr,
-            piece->oldPrFb, piece->newPrFb, false/*old_dense*/, denseFq, maxNumNodes);
+  if (oldFqSize > graph->nv / 16) {
+    // If oldFqSize too large, use pull model
+    denseFq = true; // Always use dense frontier queue for pull model
+    load_kernel<<<GET_BLOCKS(graph->nv), CUDA_NUM_THREADS>>>(
+        graph->nv, piece->oldAllPrFb, old_pr);
+    cc_pull_kernel<<<GET_BLOCKS(rowRight - rowLeft + 1), CUDA_NUM_THREADS>>>(
+        rowLeft, rowRight, colLeft, pull_row_ptrs, pull_col_idxs,
+        piece->oldAllPrFb, piece->newPrFb);
+  } else {
+    // Otherwise use push model
+    for (int i = 0; i < graph->numParts; i ++) {
+      FrontierHeader* old_header = (FrontierHeader*)(old_fq + graph->fqLeft[i]);
+      if (old_header->type == FrontierHeader::DENSE_BITMAP) {
+        checkCUDA(cudaMemcpyAsync(piece->oldFqFb + graph->fqLeft[i],
+                      old_fq + graph->fqLeft[i],
+                      (graph->rowRight[i] - graph->rowLeft[i]) / 8 + 1
+                      + sizeof(FrontierHeader),
+                      cudaMemcpyHostToDevice, piece->streams[i]));
+        int numBlocks = GET_BLOCKS(graph->rowRight[i] - graph->rowLeft[i] + 1);
+        //printf("push_row_ptrs(%llx) push_col_idxs(%llx) oldFqFb(%llx) newFqFb(%llx) oldPrFb(%llx) newPrFb(%llx) oldPrZC(%llx) oldFqZC(%llx)\n",
+        //       push_row_ptrs, push_col_idxs, piece->oldFqFb+graph->fqLeft[i], piece->newFqFb, piece->oldPrFb, piece->newPrFb, old_pr, old_fq);
+        cc_push_kernel<<<numBlocks, CUDA_NUM_THREADS, 0, piece->streams[i]>>>(
+            graph->rowLeft[i], graph->rowRight[i], rowLeft, colLeft,
+            push_row_ptrs, push_col_idxs, piece->oldFqFb + graph->fqLeft[i],
+            piece->newFqFb, old_pr, piece->oldPrFb, piece->newPrFb,
+            true/*old_dense*/, denseFq, maxNumNodes);
+      } else if (old_header->type == FrontierHeader::SPARSE_QUEUE) {
+        checkCUDA(cudaMemcpyAsync(piece->oldFqFb + graph->fqLeft[i],
+                      old_fq + graph->fqLeft[i],
+                      old_header->numNodes * sizeof(V_ID) + sizeof(FrontierHeader),
+                      cudaMemcpyHostToDevice, piece->streams[i]));
+        int numBlocks = GET_BLOCKS(old_header->numNodes);
+        // Avoid launching empty kernel
+        if (numBlocks > 0) {
+          cc_push_kernel<<<numBlocks, CUDA_NUM_THREADS, 0, piece->streams[i]>>>(
+              0, old_header->numNodes - 1, rowLeft, colLeft,
+              push_row_ptrs, push_col_idxs, piece->oldFqFb + graph->fqLeft[i],
+              piece->newFqFb, old_pr, piece->oldPrFb, piece->newPrFb,
+              false/*old_dense*/, denseFq, maxNumNodes);
+        }
+      } else {
+        // Must be either dense or sparse frontier queue
+        assert(false);
       }
-    } else {
-      // Must be either dense or sparse frontier queue
-      assert(false);
     }
-  }
+  }// else if
   checkCUDA(cudaDeviceSynchronize());
   double cp1 = Realm::Clock::current_time_in_microseconds();
   if (denseFq) {
@@ -427,11 +513,38 @@ V_ID push_app_task_impl(const Task *task,
   double ts_end = Realm::Clock::current_time_in_microseconds();
   newFqHeader->type = denseFq ? FrontierHeader::DENSE_BITMAP
                               : FrontierHeader::SPARSE_QUEUE;
-  printf("rowLeft(%u) numNodes(%u) initTime(%.0lf) compTime(%.0lf) fqTime(%.0lf) xferTime(%.0lf)\n",
+  printf("model(%d) rowLeft(%u) numNodes(%u) initTime(%.0lf) compTime(%.0lf) fqTime(%.0lf) xferTime(%.0lf)\n",
+         oldFqSize > graph->nv / 16,
          rowLeft, newFqHeader->numNodes, cp0 - ts_start, cp1 - cp0, cp2 - cp1, ts_end - cp2);
   return newFqHeader->numNodes;
   //for (V_ID n = 0; n < 10; n++) printf("oldPr[%u]: %u\n", n + rowLeft, old_pr[n + rowLeft]);
   //for (V_ID n = 0; n < 10; n++) printf("newPr[%u]: %u\n", n + rowLeft, new_pr[n]);
+}
+
+__global__
+void init_kernel(V_ID rowLeft,
+                 V_ID rowRight,
+                 E_ID colLeft,
+                 NodeStruct* pull_row_ptrs,
+                 EdgeStruct2* pull_col_idxs,
+                 const E_ID* raw_rows,
+                 const V_ID* raw_cols)
+{
+  for (V_ID n = blockIdx.x * blockDim.x + threadIdx.x;
+       n + rowLeft <= rowRight; n += blockDim.x * gridDim.x)
+  {
+    E_ID startColIdx, endColIdx = raw_rows[n];
+    if (n == 0)
+      startColIdx = colLeft;
+    else
+      startColIdx = raw_rows[n - 1];
+    pull_row_ptrs[n].index = endColIdx;
+    for (E_ID e = startColIdx; e < endColIdx; e++)
+    {
+      pull_col_idxs[e - colLeft].src = raw_cols[e - colLeft];
+      pull_col_idxs[e - colLeft].dst = n + rowLeft;
+    }
+  }
 }
 
 static inline bool compareLess(const EdgeStruct2& a, const EdgeStruct2& b)
@@ -443,43 +556,60 @@ GraphPiece push_init_task_impl(const Task *task,
                                const std::vector<PhysicalRegion> &regions,
                                Context ctx, Runtime *runtime)
 {
-  assert(regions.size() == 6);
-  assert(task->regions.size() == 6);
+  assert(regions.size() == 8);
+  assert(task->regions.size() == 8);
   const Graph *graph = (Graph*) task->args;
-  const AccessorWO<NodeStruct, 1> acc_row_ptr(regions[0], FID_DATA);
-  const AccessorWO<EdgeStruct, 1> acc_col_idx(regions[1], FID_DATA);
-  const AccessorWO<char, 1> acc_frontier(regions[2], FID_DATA);
-  const AccessorWO<Vertex, 1> acc_new_pr(regions[3], FID_DATA);
-  const AccessorRO<E_ID, 1> acc_raw_rows(regions[4], FID_DATA);
-  const AccessorRO<V_ID, 1> acc_raw_cols(regions[5], FID_DATA);
+  const AccessorWO<NodeStruct, 1> acc_pull_row_ptr(regions[0], FID_DATA);
+  const AccessorWO<EdgeStruct2, 1> acc_pull_col_idx(regions[1], FID_DATA);
+  const AccessorWO<NodeStruct, 1> acc_push_row_ptr(regions[2], FID_DATA);
+  const AccessorWO<EdgeStruct, 1> acc_push_col_idx(regions[3], FID_DATA);
+  const AccessorWO<char, 1> acc_frontier(regions[4], FID_DATA);
+  const AccessorWO<Vertex, 1> acc_new_pr(regions[5], FID_DATA);
+  const AccessorRO<E_ID, 1> acc_raw_rows(regions[6], FID_DATA);
+  const AccessorRO<V_ID, 1> acc_raw_cols(regions[7], FID_DATA);
 
-  Rect<1> rect_row_ptr = runtime->get_index_space_domain(
-                             ctx, task->regions[0].region.get_index_space());
-  Rect<1> rect_col_idx = runtime->get_index_space_domain(
-                             ctx, task->regions[1].region.get_index_space());
+  Rect<1> rect_pull_row_ptr = runtime->get_index_space_domain(ctx,
+                                  task->regions[0].region.get_index_space());
+  Rect<1> rect_pull_col_idx = runtime->get_index_space_domain(ctx,
+                                  task->regions[1].region.get_index_space());
+  Rect<1> rect_push_row_ptr = runtime->get_index_space_domain(
+                             ctx, task->regions[2].region.get_index_space());
+  Rect<1> rect_push_col_idx = runtime->get_index_space_domain(
+                             ctx, task->regions[3].region.get_index_space());
   Rect<1> rect_frontier = runtime->get_index_space_domain(
-                              ctx, task->regions[2].region.get_index_space());
-  Rect<1> rect_new_pr = runtime->get_index_space_domain(
-                            ctx, task->regions[3].region.get_index_space());
-  Rect<1> rect_raw_rows = runtime->get_index_space_domain(
                               ctx, task->regions[4].region.get_index_space());
+  Rect<1> rect_new_pr = runtime->get_index_space_domain(
+                            ctx, task->regions[5].region.get_index_space());
+  Rect<1> rect_raw_rows = runtime->get_index_space_domain(
+                              ctx, task->regions[6].region.get_index_space());
   Rect<1> rect_raw_cols = runtime->get_index_space_domain(
-                              ctx, task->regions[5].region.get_index_space());
+                              ctx, task->regions[7].region.get_index_space());
 
-  assert(acc_row_ptr.accessor.is_dense_arbitrary(rect_row_ptr));
-  assert(acc_col_idx.accessor.is_dense_arbitrary(rect_col_idx));
+  assert(acc_pull_row_ptr.accessor.is_dense_arbitrary(rect_pull_row_ptr));
+  assert(acc_pull_col_idx.accessor.is_dense_arbitrary(rect_pull_col_idx));
+  assert(acc_push_row_ptr.accessor.is_dense_arbitrary(rect_push_row_ptr));
+  assert(acc_push_col_idx.accessor.is_dense_arbitrary(rect_push_col_idx));
   assert(acc_frontier.accessor.is_dense_arbitrary(rect_frontier));
   assert(acc_new_pr.accessor.is_dense_arbitrary(rect_new_pr));
   assert(acc_raw_rows.accessor.is_dense_arbitrary(rect_raw_rows));
   assert(acc_raw_cols.accessor.is_dense_arbitrary(rect_raw_cols));
-  NodeStruct* row_ptrs = acc_row_ptr.ptr(rect_row_ptr);
-  EdgeStruct* col_idxs = acc_col_idx.ptr(rect_col_idx);
+  assert(rect_pull_col_idx == rect_push_col_idx);
+  NodeStruct* pull_row_ptrs = acc_pull_row_ptr.ptr(rect_pull_row_ptr);
+  EdgeStruct2* pull_col_idxs = acc_pull_col_idx.ptr(rect_pull_col_idx);
+  NodeStruct* push_row_ptrs = acc_push_row_ptr.ptr(rect_push_row_ptr);
+  EdgeStruct* push_col_idxs = acc_push_col_idx.ptr(rect_push_col_idx);
   char* frontier = acc_frontier.ptr(rect_frontier);
   Vertex* new_pr = acc_new_pr.ptr(rect_new_pr);
   const E_ID* raw_rows = acc_raw_rows.ptr(rect_raw_rows);
   const V_ID* raw_cols = acc_raw_cols.ptr(rect_raw_cols);
   V_ID rowLeft = rect_raw_rows.lo[0], rowRight = rect_raw_rows.hi[0];
-  E_ID colLeft = rect_col_idx.lo[0], colRight = rect_col_idx.hi[0];
+  E_ID colLeft = rect_pull_col_idx.lo[0], colRight = rect_pull_col_idx.hi[0];
+  // Init pull_row_ptrs and pull_col_idxs
+  init_kernel<<<GET_BLOCKS(rowRight - rowLeft + 1), CUDA_NUM_THREADS>>>(
+      rowLeft, rowRight, colLeft, pull_row_ptrs, pull_col_idxs,
+      raw_rows, raw_cols);
+  checkCUDA(cudaDeviceSynchronize());
+  // Init push_row_ptrs and push_col_idxs
   std::vector<EdgeStruct2> edges(colRight - colLeft + 1);
   E_ID startColIdx = colLeft;
   for (V_ID n = rowLeft; n <= rowRight; n++) {
@@ -491,18 +621,20 @@ GraphPiece push_init_task_impl(const Task *task,
     startColIdx = endColIdx;
   }
   std::sort(edges.begin(), edges.end(), compareLess);
-  assert(graph->nv == rect_row_ptr.hi[0] - rect_row_ptr.lo[0] + 1);
+  assert(graph->nv == rect_push_row_ptr.hi[0] - rect_push_row_ptr.lo[0] + 1);
   // Allocate nodes on the same memory as new_pr
   std::set<Memory> memZC;
-  regions[3].get_memories(memZC);
+  regions[5].get_memories(memZC);
   assert(memZC.size() == 1);
   assert(memZC.begin()->kind() == Memory::Z_COPY_MEM);
   Realm::MemoryImpl* memImpl =
     Realm::get_runtime()->get_memory_impl(*memZC.begin());
   Realm::LocalCPUMemory* memZCImpl = (Realm::LocalCPUMemory*) memImpl;
   off_t offset = memZCImpl->alloc_bytes(sizeof(NodeStruct) * graph->nv);
+  assert(offset >= 0);
   NodeStruct* nodes = (NodeStruct*) memZCImpl->get_direct_ptr(offset, 0);
   off_t offset2 = memZCImpl->alloc_bytes(sizeof(EdgeStruct) * (colRight - colLeft + 1));
+  assert(offset2 >= 0);
   EdgeStruct* dsts = (EdgeStruct*) memZCImpl->get_direct_ptr(offset2, 0);
   E_ID cur = colLeft;
   for (V_ID n = 0; n < graph->nv; n++) {
@@ -510,18 +642,18 @@ GraphPiece push_init_task_impl(const Task *task,
       cur ++;
     nodes[n].index = cur;
   }
-  checkCUDA(cudaMemcpy(row_ptrs, nodes, sizeof(NodeStruct) * graph->nv,
+  checkCUDA(cudaMemcpy(push_row_ptrs, nodes, sizeof(NodeStruct) * graph->nv,
                        cudaMemcpyHostToDevice));
   for (E_ID e = colLeft; e <= colRight; e++)
     dsts[e - colLeft] = edges[e - colLeft].dst;
-  checkCUDA(cudaMemcpy(col_idxs, dsts,
+  checkCUDA(cudaMemcpy(push_col_idxs, dsts,
                        sizeof(EdgeStruct) * (colRight - colLeft + 1),
                        cudaMemcpyHostToDevice));
   memZCImpl->free_bytes(offset, sizeof(NodeStruct) * graph->nv);
   memZCImpl->free_bytes(offset2, sizeof(EdgeStruct) * (colRight - colLeft + 1));
   FrontierHeader* header = (FrontierHeader*) frontier;
   header->type = FrontierHeader::DENSE_BITMAP;
-  header->numNodes = 0;
+  header->numNodes = graph->nv;
   char* bitmap = frontier + sizeof(FrontierHeader);
   memset(bitmap, 0xFF, (rowRight - rowLeft) / 8 + 1);
   for (V_ID n = rowLeft; n <= rowRight; n++)
@@ -537,13 +669,20 @@ GraphPiece push_init_task_impl(const Task *task,
   memImpl = Realm::get_runtime()->get_memory_impl(*memFB.begin());
   Realm::Cuda::GPUFBMemory* memFBImpl = (Realm::Cuda::GPUFBMemory*) memImpl;
   offset = memFBImpl->alloc_bytes(sizeof(Vertex) * (rowRight - rowLeft + 1));
+  assert(offset >= 0);
   piece.oldPrFb = (Vertex*) memFBImpl->get_direct_ptr(offset, 0);
   offset = memFBImpl->alloc_bytes(sizeof(Vertex) * (rowRight - rowLeft + 1));
+  assert(offset >= 0);
   piece.newPrFb = (Vertex*) memFBImpl->get_direct_ptr(offset, 0);
   offset = memFBImpl->alloc_bytes(graph->frontierSize);
+  assert(offset >= 0);
   piece.oldFqFb = (char*) memFBImpl->get_direct_ptr(offset, 0);
   offset = memFBImpl->alloc_bytes(rect_frontier.hi[0] - rect_frontier.lo[0] + 1);
+  assert(offset >= 0);
   piece.newFqFb = (char*) memFBImpl->get_direct_ptr(offset, 0);
+  offset = memFBImpl->alloc_bytes(sizeof(Vertex) * graph->nv);
+  assert(offset >= 0);
+  piece.oldAllPrFb = (Vertex*) memFBImpl->get_direct_ptr(offset, 0);
   // Initialize newPrFb
   checkCUDA(cudaMemcpy(piece.newPrFb, new_pr,
                        sizeof(Vertex) * (rowRight - rowLeft + 1),

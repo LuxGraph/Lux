@@ -58,14 +58,18 @@ public:
   V_ID frontierSize; // maximum allowed size for frontier queues
   V_ID rowLeft[MAX_NUM_PARTS], rowRight[MAX_NUM_PARTS];
   V_ID fqLeft[MAX_NUM_PARTS], fqRight[MAX_NUM_PARTS];
-  LogicalRegion row_ptr_lr;
-  LogicalPartition row_ptr_lp;
+  LogicalRegion pull_row_ptr_lr;
+  LogicalPartition pull_row_ptr_lp;
+  LogicalRegion push_row_ptr_lr;
+  LogicalPartition push_row_ptr_lp;
   LogicalRegion raw_row_lr;
   LogicalPartition raw_row_lp;
   LogicalRegion in_vtx_lr;
   LogicalPartition in_vtx_lp;
-  LogicalRegion col_idx_lr;
-  LogicalPartition col_idx_lp;
+  LogicalRegion pull_col_idx_lr;
+  LogicalPartition pull_col_idx_lp;
+  LogicalRegion push_col_idx_lr;
+  LogicalPartition push_col_idx_lp;
   LogicalRegion raw_col_lr;
   LogicalPartition raw_col_lp;
   LogicalRegion degree_lr;
@@ -85,7 +89,7 @@ public:
   V_ID nv;
   E_ID ne;
   char *oldFqFb, *newFqFb;
-  Vertex *oldPrFb, *newPrFb;
+  Vertex *oldPrFb, *newPrFb, *oldAllPrFb;
   cudaStream_t streams[MAX_NUM_PARTS];
 };
 

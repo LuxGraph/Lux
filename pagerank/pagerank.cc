@@ -99,7 +99,7 @@ void parse_input_args(char **argv, int argc,
 {
   for (int i = 1; i < argc; i++) 
   {
-    if (!strcmp(argv[i], "-ng")) 
+    if ((!strcmp(argv[i], "-ng")) || (!strcmp(argv[i], "-ll:gpu"))) 
     {
       numGPU = atoi(argv[++i]);
       continue;

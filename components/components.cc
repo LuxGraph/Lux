@@ -230,23 +230,39 @@ PushInitTask::PushInitTask(const Graph &graph,
   : IndexLauncher(PUSH_INIT_TASK_ID, domain,
         TaskArgument(&graph, sizeof(Graph)), arg_map)
 {
-  // regions[0]: row_ptrs
+  // regions[0]: pull_row_ptrs
   {
-    RegionRequirement rr(graph.row_ptr_lp, 0/*identity*/,
-                         WRITE_ONLY, EXCLUSIVE, graph.row_ptr_lr,
+    RegionRequirement rr(graph.pull_row_ptr_lp, 0/*identity*/,
+                         WRITE_ONLY, EXCLUSIVE, graph.pull_row_ptr_lr,
                          MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
-  // regions[1]: col_idxs
+  // regions[1]: pull_col_idxs
   {
-    RegionRequirement rr(graph.col_idx_lp, 0/*identity*/,
-                         WRITE_ONLY, EXCLUSIVE, graph.col_idx_lr,
+    RegionRequirement rr(graph.pull_col_idx_lp, 0/*identity*/,
+                         WRITE_ONLY, EXCLUSIVE, graph.pull_col_idx_lr,
                          MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
-  // regions[2]: new_fq
+  // regions[2]: push_row_ptrs
+  {
+    RegionRequirement rr(graph.push_row_ptr_lp, 0/*identity*/,
+                         WRITE_ONLY, EXCLUSIVE, graph.push_row_ptr_lr,
+                         MAP_TO_FB_MEMORY);
+    rr.add_field(FID_DATA);
+    add_region_requirement(rr);
+  }
+  // regions[3]: push_col_idxs
+  {
+    RegionRequirement rr(graph.push_col_idx_lp, 0/*identity*/,
+                         WRITE_ONLY, EXCLUSIVE, graph.push_col_idx_lr,
+                         MAP_TO_FB_MEMORY);
+    rr.add_field(FID_DATA);
+    add_region_requirement(rr);
+  }
+  // regions[4]: new_fq
   {
     RegionRequirement rr(graph.frontier_lp[0], 0/*identity*/,
                          WRITE_ONLY, EXCLUSIVE, graph.frontier_lr[0],
@@ -254,7 +270,7 @@ PushInitTask::PushInitTask(const Graph &graph,
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
-  // regions[3]: new_pr
+  // regions[5]: new_pr
   {
     RegionRequirement rr(graph.dist_lp[0], 0/*identity*/,
                          WRITE_ONLY, EXCLUSIVE, graph.dist_lr[0],
@@ -262,7 +278,7 @@ PushInitTask::PushInitTask(const Graph &graph,
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
-  // regions[4]: raw_rows
+  // regions[6]: raw_rows
   {
     RegionRequirement rr(graph.raw_row_lp, 0/*identity*/,
                          READ_ONLY, EXCLUSIVE, graph.raw_row_lr,
@@ -270,7 +286,7 @@ PushInitTask::PushInitTask(const Graph &graph,
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
-  // regions[5]: raw_cols
+  // regions[7]: raw_cols
   {
     RegionRequirement rr(graph.raw_col_lp, 0/*identity*/,
                          READ_ONLY, EXCLUSIVE, graph.raw_col_lr,
@@ -287,23 +303,39 @@ PushAppTask::PushAppTask(const Graph &graph,
   : IndexLauncher(PUSH_APP_TASK_ID, domain,
                   TaskArgument(&graph, sizeof(Graph)), arg_map)
 {
-  // regions[0]: row_ptrs
+  // regions[0]: pull_row_ptrs
   {
-    RegionRequirement rr(graph.row_ptr_lp, 0/*identity*/,
-                         READ_ONLY, EXCLUSIVE, graph.row_ptr_lr,
+    RegionRequirement rr(graph.pull_row_ptr_lp, 0/*identity*/,
+                         WRITE_ONLY, EXCLUSIVE, graph.pull_row_ptr_lr,
                          MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
-  // regions[1]: col_idxs
+  // regions[1]: pull_col_idxs
   {
-    RegionRequirement rr(graph.col_idx_lp, 0/*identity*/,
-                         READ_ONLY, EXCLUSIVE, graph.col_idx_lr,
+    RegionRequirement rr(graph.pull_col_idx_lp, 0/*identity*/,
+                         WRITE_ONLY, EXCLUSIVE, graph.pull_col_idx_lr,
                          MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
-  // regions[2]: old_fq
+  // regions[2]: push_row_ptrs
+  {
+    RegionRequirement rr(graph.push_row_ptr_lp, 0/*identity*/,
+                         READ_ONLY, EXCLUSIVE, graph.push_row_ptr_lr,
+                         MAP_TO_FB_MEMORY);
+    rr.add_field(FID_DATA);
+    add_region_requirement(rr);
+  }
+  // regions[3]: push_col_idxs
+  {
+    RegionRequirement rr(graph.push_col_idx_lp, 0/*identity*/,
+                         READ_ONLY, EXCLUSIVE, graph.push_col_idx_lr,
+                         MAP_TO_FB_MEMORY);
+    rr.add_field(FID_DATA);
+    add_region_requirement(rr);
+  }
+  // regions[4]: old_fq
   {
     RegionRequirement rr(graph.frontier_lr[iter%2], 0/*identity*/,
                          READ_ONLY, EXCLUSIVE, graph.frontier_lr[iter%2],
@@ -311,7 +343,7 @@ PushAppTask::PushAppTask(const Graph &graph,
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
-  // regions[3]: new_fq
+  // regions[5]: new_fq
   {
     RegionRequirement rr(graph.frontier_lp[(iter+1)%2], 0/*identity*/,
                          WRITE_ONLY, EXCLUSIVE, graph.frontier_lr[(iter+1)%2],
@@ -319,7 +351,7 @@ PushAppTask::PushAppTask(const Graph &graph,
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
-  // regions[4]: old_pr
+  // regions[6]: old_pr
   {
     RegionRequirement rr(graph.dist_lr[iter%2], 0/*identity*/,
                          READ_ONLY, EXCLUSIVE, graph.dist_lr[iter%2],
@@ -327,7 +359,7 @@ PushAppTask::PushAppTask(const Graph &graph,
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
-  // regions[5]: new_pr
+  // regions[7]: new_pr
   {
     RegionRequirement rr(graph.dist_lp[(iter+1)%2], 0/*identity*/,
                          WRITE_ONLY, EXCLUSIVE, graph.dist_lr[(iter+1)%2],
@@ -370,8 +402,10 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     runtime->attach_name(row_ptr_fs, "row_ptrs(NodeStruct)");
     FieldSpace raw_row_fs = runtime->create_field_space(ctx);
     runtime->attach_name(raw_row_fs, "raw_rows(E_ID)");
-    FieldSpace col_idx_fs = runtime->create_field_space(ctx);
-    runtime->attach_name(col_idx_fs, "col_idxs(EdgeStruct)");
+    FieldSpace push_col_idx_fs = runtime->create_field_space(ctx);
+    runtime->attach_name(push_col_idx_fs, "col_idxs(EdgeStruct)");
+    FieldSpace pull_col_idx_fs = runtime->create_field_space(ctx);
+    runtime->attach_name(pull_col_idx_fs, "col_idxs(EdgeStruct2)");
     FieldSpace raw_col_fs = runtime->create_field_space(ctx);
     runtime->attach_name(raw_col_fs, "raw_cols(V_ID)");
     FieldSpace frontier_fs = runtime->create_field_space(ctx);
@@ -382,15 +416,18 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     // Allocate fields
     alloc_fs<NodeStruct>(ctx, runtime, row_ptr_fs);
     alloc_fs<E_ID>(ctx, runtime, raw_row_fs);
-    alloc_fs<EdgeStruct>(ctx, runtime, col_idx_fs);
+    alloc_fs<EdgeStruct>(ctx, runtime, push_col_idx_fs);
+    alloc_fs<EdgeStruct2>(ctx, runtime, pull_col_idx_fs);
     alloc_fs<V_ID>(ctx, runtime, raw_col_fs);
     alloc_fs<char>(ctx, runtime, frontier_fs);
     alloc_fs<Vertex>(ctx, runtime, dist_fs);
 
     // Make logical regions
-    row_ptr_lr = runtime->create_logical_region(ctx, row_is, row_ptr_fs);
+    push_row_ptr_lr = runtime->create_logical_region(ctx, row_is, row_ptr_fs);
+    pull_row_ptr_lr = runtime->create_logical_region(ctx, vtx_is, row_ptr_fs);
     raw_row_lr = runtime->create_logical_region(ctx, vtx_is, raw_row_fs);
-    col_idx_lr = runtime->create_logical_region(ctx, edge_is, col_idx_fs);
+    push_col_idx_lr = runtime->create_logical_region(ctx, edge_is, push_col_idx_fs);
+    pull_col_idx_lr = runtime->create_logical_region(ctx, edge_is, pull_col_idx_fs);
     raw_col_lr = runtime->create_logical_region(ctx, edge_is, raw_col_fs);
     for (int i = 0; i < 2; i++)
     {
@@ -473,6 +510,7 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
                                         pvt_vtx_coloring, true);
     assert(runtime->is_index_partition_disjoint(ctx, vtx_ip));
     assert(runtime->is_index_partition_complete(ctx, vtx_ip));
+    pull_row_ptr_lp = runtime->get_logical_partition(ctx, pull_row_ptr_lr, vtx_ip);
     raw_row_lp = runtime->get_logical_partition(ctx, raw_row_lr, vtx_ip);
     for (int i = 0; i < 2; i++)
     {
@@ -494,7 +532,7 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
                                           row_coloring, true);
     assert(runtime->is_index_partition_disjoint(ctx, row_ip));
     assert(runtime->is_index_partition_complete(ctx, row_ip));
-    row_ptr_lp = runtime->get_logical_partition(ctx, row_ptr_lr, row_ip);
+    push_row_ptr_lp = runtime->get_logical_partition(ctx, push_row_ptr_lr, row_ip);
   }
   // Second, we partition the frontiers
   {
@@ -531,8 +569,10 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     IndexPartition col_idx_ip
       = runtime->create_index_partition(ctx, edge_is, color_domain,
                                         edges_coloring, true);
-    col_idx_lp =
-        runtime->get_logical_partition(ctx, col_idx_lr, col_idx_ip);
+    push_col_idx_lp =
+        runtime->get_logical_partition(ctx, push_col_idx_lr, col_idx_ip);
+    pull_col_idx_lp =
+        runtime->get_logical_partition(ctx, pull_col_idx_lr, col_idx_ip);
     raw_col_lp =
         runtime->get_logical_partition(ctx, raw_col_lr, col_idx_ip);
   }

@@ -275,8 +275,10 @@ GraphPiece init_task_impl(const Task *task,
       Realm::get_runtime()->get_memory_impl(*memFB.begin());
   Realm::Cuda::GPUFBMemory* memFBImpl = (Realm::Cuda::GPUFBMemory*) memImpl;
   off_t offset = memFBImpl->alloc_bytes(sizeof(Vertex) * graph->nv);
+  assert(offset >= 0);
   piece.oldPrFb = (Vertex*) memFBImpl->get_direct_ptr(offset, 0);
   offset = memFBImpl->alloc_bytes(sizeof(Vertex) * (rowRight - rowLeft + 1));
+  assert(offset >= 0);
   piece.newPrFb = (Vertex*) memFBImpl->get_direct_ptr(offset, 0);
   //checkCUDA(cudaMalloc(&(piece.oldPrFb), sizeof(float) * graph->nv));
   //checkCUDA(cudaMalloc(&(piece.newPrFb), sizeof(float) * (rowRight-rowLeft+1)));
