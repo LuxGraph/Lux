@@ -69,10 +69,10 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     alloc_fs<Vertex>(ctx, runtime, dist_fs);
 
     // Make logical regions
-    row_ptr_lr = runtime->create_logical_region(ctx, vtx_is, row_ptr_fs);
+    pull_row_ptr_lr = runtime->create_logical_region(ctx, vtx_is, row_ptr_fs);
     raw_row_lr = runtime->create_logical_region(ctx, vtx_is, raw_row_fs);
     in_vtx_lr = runtime->create_logical_region(ctx, edge_is, in_vtx_fs);
-    col_idx_lr = runtime->create_logical_region(ctx, edge_is, col_idx_fs);
+    pull_col_idx_lr = runtime->create_logical_region(ctx, edge_is, col_idx_fs);
     raw_col_lr = runtime->create_logical_region(ctx, edge_is, raw_col_fs);
     for (int i = 0; i < 2; i++)
     {
@@ -145,7 +145,7 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     IndexPartition vtx_ip
       = runtime->create_index_partition(ctx, vtx_is, color_domain,
                                         pvt_vtx_coloring, true);
-    row_ptr_lp = runtime->get_logical_partition(ctx, row_ptr_lr, vtx_ip);
+    pull_row_ptr_lp = runtime->get_logical_partition(ctx, pull_row_ptr_lr, vtx_ip);
     raw_row_lp = runtime->get_logical_partition(ctx, raw_row_lr, vtx_ip);
     for (int i = 0; i < 2; i++)
     {
@@ -174,8 +174,8 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     IndexPartition col_idx_ip
       = runtime->create_index_partition(ctx, edge_is, color_domain,
                                         edges_coloring, true);
-    col_idx_lp =
-        runtime->get_logical_partition(ctx, col_idx_lr, col_idx_ip);
+    pull_col_idx_lp =
+        runtime->get_logical_partition(ctx, pull_col_idx_lr, col_idx_ip);
     raw_col_lp =
         runtime->get_logical_partition(ctx, raw_col_lr, col_idx_ip);
     in_vtx_lp =
@@ -347,8 +347,8 @@ InitTask::InitTask(const Graph &graph,
 {
   // regions[0]: row_ptrs
   {
-    RegionRequirement rr(graph.row_ptr_lp, 0/*identity*/,
-                         WRITE_ONLY, EXCLUSIVE, graph.row_ptr_lr,
+    RegionRequirement rr(graph.pull_row_ptr_lp, 0/*identity*/,
+                         WRITE_ONLY, EXCLUSIVE, graph.pull_row_ptr_lr,
                          MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
@@ -363,8 +363,8 @@ InitTask::InitTask(const Graph &graph,
   }
   // regions[2]: col_idxs
   {
-    RegionRequirement rr(graph.col_idx_lp, 0/*identity*/,
-                         WRITE_ONLY, EXCLUSIVE, graph.col_idx_lr,
+    RegionRequirement rr(graph.pull_col_idx_lp, 0/*identity*/,
+                         WRITE_ONLY, EXCLUSIVE, graph.pull_col_idx_lr,
                          MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
@@ -424,8 +424,8 @@ AppTask::AppTask(const Graph &graph,
 {
   // regions[0]: row_ptrs
   {
-    RegionRequirement rr(graph.row_ptr_lp, 0/*identity*/,
-                         READ_ONLY, EXCLUSIVE, graph.row_ptr_lr,
+    RegionRequirement rr(graph.pull_row_ptr_lp, 0/*identity*/,
+                         READ_ONLY, EXCLUSIVE, graph.pull_row_ptr_lr,
                          MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
@@ -440,8 +440,8 @@ AppTask::AppTask(const Graph &graph,
   }
   // regions[2]: col_idxs
   {
-    RegionRequirement rr(graph.col_idx_lp, 0/*identity*/,
-                         READ_ONLY, EXCLUSIVE, graph.col_idx_lr,
+    RegionRequirement rr(graph.pull_col_idx_lp, 0/*identity*/,
+                         READ_ONLY, EXCLUSIVE, graph.pull_col_idx_lr,
                          MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
