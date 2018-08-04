@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #define SPARSE_THRESHOLD 16
+#define SLIDING_WINDOW 4 // Pre-launch more tasks to hide runtime overhead
 typedef uint32_t V_ID;
 typedef uint64_t E_ID;
 

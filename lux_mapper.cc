@@ -84,7 +84,14 @@ void LuxMapper::select_task_options(const MapperContext ctx,
                                          const Task& task,
                                          TaskOptions& output)
 {
-  DefaultMapper::select_task_options(ctx, task, output);
+  //if (task.task_id == PUSH_INIT_VTX_TASK_ID) {
+  //  output.inline_task = false;
+  //  output.stealable = false;
+  //  output.map_locally = true;
+  //  output.initial_proc = allCPUs[0]->at(0);
+  //} else {
+    DefaultMapper::select_task_options(ctx, task, output);
+  //}
 }
 
 void LuxMapper::slice_task(const MapperContext ctx,
@@ -111,23 +118,23 @@ void LuxMapper::slice_task(const MapperContext ctx,
     }
     output.slices = gpuSlices;
   } else if (task.task_id == LOAD_TASK_ID) {
-   if (cpuSlices.size() > 0) {
-     output.slices = cpuSlices;
-     return;
-   }
-   Rect<1> input_rect = input.domain;
-   unsigned cnt = 0;
-   for (PointInRectIterator<1> it(input_rect); it(); it++) {
-     TaskSlice slice;
-     Rect<1> task_rect(*it, *it);
-     slice.domain = task_rect;
-     slice.proc = allCPUs[cnt % numNodes]->at(((cnt/numNodes)*9)%local_cpus.size());
-     cnt ++;
-     slice.recurse = false;
-     slice.stealable = false;
-     cpuSlices.push_back(slice);
-   }
-   output.slices = cpuSlices;
+    if (cpuSlices.size() > 0) {
+      output.slices = cpuSlices;
+      return;
+    }
+    Rect<1> input_rect = input.domain;
+    unsigned cnt = 0;
+    for (PointInRectIterator<1> it(input_rect); it(); it++) {
+      TaskSlice slice;
+      Rect<1> task_rect(*it, *it);
+      slice.domain = task_rect;
+      slice.proc = allCPUs[cnt % numNodes]->at(((cnt/numNodes)*9)%local_cpus.size());
+      cnt ++;
+      slice.recurse = false;
+      slice.stealable = false;
+      cpuSlices.push_back(slice);
+    }
+    output.slices = cpuSlices;
   } else {
     DefaultMapper::slice_task(ctx, task, input, output);
   }

@@ -385,7 +385,7 @@ V_ID push_app_task_impl(const Task *task,
   V_ID fqLeft = rect_new_fq.lo[0], fqRight = rect_new_fq.hi[0];
 
   double ts_start = Realm::Clock::current_time_in_microseconds();
-  // Copy piece->newPrFb to piece->oldPrFb
+  // Copy piece->newPrFb to piece->oldPrFb by swaping the two pointers
   checkCUDA(cudaMemcpy(piece->oldPrFb, piece->newPrFb,
                        sizeof(Vertex) * (rowRight - rowLeft + 1),
                        cudaMemcpyDeviceToDevice));

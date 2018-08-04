@@ -54,6 +54,9 @@ void top_level_task(const Task *task,
   PushLoadTask load_task(graph, task_is, local_args, filename);
   FutureMap fm = runtime->execute_index_space(ctx, load_task);
   fm.wait_all_results();
+  PushInitVtxTask init_vtx_task(graph);
+  Future f = runtime->execute_task(ctx, init_vtx_task);
+  f.get_void_result();
 
   PushInitTask init_task(graph, task_is, local_args);
   fm = runtime->execute_index_space(ctx, init_task);
@@ -64,24 +67,31 @@ void top_level_task(const Task *task,
   }
 
   // CC phase
-  int iteration = 0;
+  FutureMap fms[SLIDING_WINDOW];
+  int iter = 0;
   log_cc.print("Start Connected Components computation...");
   double ts_start = Realm::Clock::current_time_in_microseconds();
   while (true) {
-    PushAppTask app_task(graph, task_is, local_args, iteration);
-    fm = runtime->execute_index_space(ctx, app_task);
-    //fm.wait_all_results();
-    bool halt = true;
-    //for (PointInRectIterator<1> it(task_rect); it(); it++) {
-    //  V_ID numNodes = fm.get_result<V_ID>(*it);
-    //  if (numNodes > 0) halt = false;
-    //}
-    if (iteration > 20) break;
-    iteration ++;
+    if (iter >= SLIDING_WINDOW) {
+      fm = fms[iter % SLIDING_WINDOW];
+      fm.wait_all_results();
+      bool halt = true;
+      for (PointInRectIterator<1> it(task_rect); it(); it++) {
+        V_ID numNodes = fm.get_result<V_ID>(*it);
+        if (numNodes > 0) halt = false;
+      }
+      if (halt) break;
+    }
+    PushAppTask app_task(graph, task_is, local_args, iter);
+    fms[iter % SLIDING_WINDOW] = runtime->execute_index_space(ctx, app_task);
+    iter ++;
   }
-  fm.wait_all_results();
   double ts_end = Realm::Clock::current_time_in_microseconds();
   double sim_time = 1e-6 * (ts_end - ts_start);
+  runtime->issue_execution_fence(ctx);
+  TimingLauncher timer(MEASURE_MICRO_SECONDS);
+  Future future = runtime->issue_timing_measurement(ctx, timer);
+  future.get_void_result();
   log_cc.print("Finish Connected Components computation...");
   printf("ELAPSED TIME = %7.7f s\n", sim_time);
 }
@@ -123,10 +133,18 @@ int main(int argc, char **argv)
     Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
   }
   {
+    TaskVariantRegistrar registrar(PUSH_INIT_VTX_TASK_ID, "init_vtx_task (push)");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
+    Runtime::preregister_task_variant<push_init_vtx_task_impl>(
+        registrar, "init_vtx_task (push)");
+  }
+  {
     TaskVariantRegistrar registrar(PUSH_LOAD_TASK_ID, "load_task (push)");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
     registrar.set_leaf();
-    Runtime::preregister_task_variant<push_load_task_impl>(registrar, "load_task (push)");
+    Runtime::preregister_task_variant<push_load_task_impl>(
+        registrar, "load_task (push)");
   }
   {
     TaskVariantRegistrar registrar(PUSH_INIT_TASK_ID, "init_task (push)");
@@ -152,6 +170,51 @@ void alloc_fs(Context ctx, Runtime *runtime, FieldSpace fs)
 {
   FieldAllocator allocator = runtime->create_field_allocator(ctx, fs);
   allocator.allocate_field(sizeof(T), FID_DATA);
+}
+
+PushInitVtxTask::PushInitVtxTask(const Graph &graph)
+  : TaskLauncher(PUSH_INIT_VTX_TASK_ID, TaskArgument(NULL, 0))
+{
+  // regions[0]: dist_lr[0]
+  {
+    RegionRequirement rr(graph.dist_lr[0],
+                         WRITE_ONLY, EXCLUSIVE, graph.dist_lr[0],
+                         MAP_TO_ZC_MEMORY);
+    rr.add_field(FID_DATA);
+    add_region_requirement(rr);
+  }
+  // regions[1]: dist_lr[1]
+  {
+    RegionRequirement rr(graph.dist_lr[1],
+                         WRITE_ONLY, EXCLUSIVE, graph.dist_lr[1],
+                         MAP_TO_ZC_MEMORY);
+    rr.add_field(FID_DATA);
+    add_region_requirement(rr);
+  }
+  // regions[2]: frontier_lr[0]
+  {
+    RegionRequirement rr(graph.frontier_lr[0],
+                         WRITE_ONLY, EXCLUSIVE, graph.frontier_lr[0],
+                         MAP_TO_ZC_MEMORY);
+    rr.add_field(FID_DATA);
+    add_region_requirement(rr);
+  }
+  // regions[3]: frontier_lr[1]
+  {
+    RegionRequirement rr(graph.frontier_lr[1],
+                         WRITE_ONLY, EXCLUSIVE, graph.frontier_lr[1],
+                         MAP_TO_ZC_MEMORY);
+    rr.add_field(FID_DATA);
+    add_region_requirement(rr);
+  }
+
+}
+
+void push_init_vtx_task_impl(const Task *task,
+                             const std::vector<PhysicalRegion> &regions,
+                             Context ctx, Runtime* runtime)
+{
+  // dummy task to create entire vertex instances in ZCM
 }
 
 PushLoadTask::PushLoadTask(const Graph &graph,

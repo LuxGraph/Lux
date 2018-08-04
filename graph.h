@@ -42,6 +42,7 @@ enum {
   PUSH_LOAD_TASK_ID,
   PUSH_INIT_TASK_ID,
   PUSH_APP_TASK_ID,
+  PUSH_INIT_VTX_TASK_ID,
 };
 
 enum FieldIDs {
@@ -154,8 +155,18 @@ GraphPiece init_task_impl(const Task *task,
                           Context ctx, Runtime *runtime);
 
 // ----------------------------------------------------------------------------
-// Tasks for Pull-based Execution
+// Tasks for Push-based Execution
 // ----------------------------------------------------------------------------
+class PushInitVtxTask : public TaskLauncher
+{
+public:
+  PushInitVtxTask(const Graph &graph);
+};
+
+void push_init_vtx_task_impl(const Task *task,
+                             const std::vector<PhysicalRegion> &regions,
+                             Context ctx, Runtime *runtime);
+
 class PushLoadTask : public IndexLauncher
 {
 public:
