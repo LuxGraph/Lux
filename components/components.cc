@@ -44,6 +44,9 @@ void top_level_task(const Task *task,
               numGPU);
       return;
     }
+    size_t numNodes = Realm::Machine::get_machine().get_address_space_count();
+    assert(numNodes > 0);
+    numGPU = numGPU * numNodes;
   }
 
   Graph graph(ctx, runtime, numGPU, filename);
@@ -103,7 +106,7 @@ void parse_input_args(char **argv, int argc,
 {
   for (int i = 1; i < argc; i++) 
   {
-    if (!strcmp(argv[i], "-ng")) 
+    if ((!strcmp(argv[i], "-ng")) || (!strcmp(argv[i], "-ll:gpu"))) 
     {
       numGPU = atoi(argv[++i]);
       continue;

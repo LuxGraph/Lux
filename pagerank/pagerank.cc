@@ -16,6 +16,7 @@
 #include <cstdio>
 #include "../core/lux_mapper.h"
 #include "../core/graph.h"
+#include "realm/machine.h"
 #include "math.h"
 #include "legion.h"
 #include "queue"
@@ -39,12 +40,15 @@ void top_level_task(const Task *task, const std::vector<PhysicalRegion> &regions
     int argc = command_args.argc;
     parse_input_args(argv, argc, numGPU, numIter, filename);
     log_pr.print("PageRank settings: numPartitions(%d) numIter(%d)" 
-                 "filename = %s", numGPU, numIter, filename.c_str());
+                 " filename = %s", numGPU, numIter, filename.c_str());
     if ((numGPU <= 0) || (numIter <= 0)) {
       fprintf(stderr, "numGPU(%d) and numIter(%d) must be greater than zero.\n",
               numGPU, numIter);
       return;
     }
+    size_t numNodes = Realm::Machine::get_machine().get_address_space_count();
+    assert(numNodes > 0);
+    numGPU = numGPU * numNodes;
   }
 
   Graph graph(ctx, runtime, numGPU, filename);
