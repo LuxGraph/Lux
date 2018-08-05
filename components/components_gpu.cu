@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-#include "../graph.h"
-#include "../cuda_helper.h"
+#include "../core/graph.h"
+#include "../core/cuda_helper.h"
 #include "realm/runtime_impl.h"
 #include "realm/cuda/cuda_module.h"
 #include <cuda_runtime.h>
@@ -513,9 +513,9 @@ V_ID push_app_task_impl(const Task *task,
   double ts_end = Realm::Clock::current_time_in_microseconds();
   newFqHeader->type = denseFq ? FrontierHeader::DENSE_BITMAP
                               : FrontierHeader::SPARSE_QUEUE;
-  printf("model(%d) rowLeft(%u) numNodes(%u) initTime(%.0lf) compTime(%.0lf) fqTime(%.0lf) xferTime(%.0lf)\n",
-         oldFqSize > graph->nv / 16,
-         rowLeft, newFqHeader->numNodes, cp0 - ts_start, cp1 - cp0, cp2 - cp1, ts_end - cp2);
+  if (graph->verbose)
+    printf("rowLeft(%u) activeNodes(%u) loadTime(%.0lf) compTime(%.0lf) updateTime(%.0lf)",
+           rowLeft, newFqHeader->numNodes, cp0 - ts_start, cp1 - cp0, ts_end - cp1);
   return newFqHeader->numNodes;
   //for (V_ID n = 0; n < 10; n++) printf("oldPr[%u]: %u\n", n + rowLeft, old_pr[n + rowLeft]);
   //for (V_ID n = 0; n < 10; n++) printf("newPr[%u]: %u\n", n + rowLeft, new_pr[n]);

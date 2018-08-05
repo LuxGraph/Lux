@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-#include "../graph.h"
-#include "../cuda_helper.h"
+#include "../core/graph.h"
+#include "../core/cuda_helper.h"
 #include "realm/runtime_impl.h"
 #include "realm/cuda/cuda_module.h"
 #include <cuda_runtime.h>
@@ -102,9 +102,9 @@ void pr_kernel(V_ID rowLeft,
 }
 
 /*static*/
-void app_task_impl(const Task *task,
-                   const std::vector<PhysicalRegion> &regions,
-                   Context ctx, Runtime *runtime)
+void pull_app_task_impl(const Task *task,
+                        const std::vector<PhysicalRegion> &regions,
+                        Context ctx, Runtime *runtime)
 {
   assert(regions.size() == 5);
   assert(task->regions.size() == 5);
@@ -179,9 +179,9 @@ void init_kernel(V_ID rowLeft,
   }
 }
 
-GraphPiece init_task_impl(const Task *task,
-                          const std::vector<PhysicalRegion> &regions,
-                          Context ctx, Runtime *runtime)
+GraphPiece pull_init_task_impl(const Task *task,
+                               const std::vector<PhysicalRegion> &regions,
+                               Context ctx, Runtime *runtime)
 {
 #ifndef VERTEX_DEGREE
   assert(false);

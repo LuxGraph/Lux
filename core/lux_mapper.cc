@@ -99,7 +99,8 @@ void LuxMapper::slice_task(const MapperContext ctx,
                                 const SliceTaskInput& input,
                                 SliceTaskOutput& output)
 {
-  if (task.task_id == APP_TASK_ID || task.task_id == INIT_TASK_ID) {
+  if (task.task_id == PULL_APP_TASK_ID || task.task_id == PULL_INIT_TASK_ID
+    ||task.task_id == PUSH_APP_TASK_ID || task.task_id == PUSH_INIT_TASK_ID) {
     if (gpuSlices.size() > 0) {
       output.slices = gpuSlices;
       return;
@@ -117,7 +118,7 @@ void LuxMapper::slice_task(const MapperContext ctx,
       gpuSlices.push_back(slice);
     }
     output.slices = gpuSlices;
-  } else if (task.task_id == LOAD_TASK_ID) {
+  } else if (task.task_id == PULL_LOAD_TASK_ID || task.task_id == PUSH_LOAD_TASK_ID) {
     if (cpuSlices.size() > 0) {
       output.slices = cpuSlices;
       return;

@@ -37,7 +37,7 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     assert(fread_ret == 1);
     fread_ret = fread(&ne, sizeof(E_ID), 1, fd);
     assert(fread_ret == 1);
-    log_lux.print("Load graph: numNodes(%zu) numEdges(%zu)\n", nv, ne);
+    log_lux.print("Load graph: numNodes(%u) numEdges(%zu)", nv, ne);
     Rect<1> vtx_rect(Point<1>(0), Point<1>(nv - 1));
     IndexSpaceT<1> vtx_is =
       runtime->create_index_space(ctx, vtx_rect);
@@ -190,11 +190,12 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
   free(raw_rows);
 }
 
-LoadTask::LoadTask(const Graph &graph,
-                   const IndexSpaceT<1> &domain,
-                   const ArgumentMap &arg_map,
-                   std::string &fn)
-  : IndexLauncher(LOAD_TASK_ID, domain, TaskArgument(fn.c_str(), MAX_FILE_LEN), arg_map)
+PullLoadTask::PullLoadTask(const Graph &graph,
+                           const IndexSpaceT<1> &domain,
+                           const ArgumentMap &arg_map,
+                           std::string &fn)
+  : IndexLauncher(PULL_LOAD_TASK_ID, domain,
+                  TaskArgument(fn.c_str(), MAX_FILE_LEN), arg_map)
 {
   // regions[0]: raw_rows
   {
@@ -224,8 +225,8 @@ LoadTask::LoadTask(const Graph &graph,
 #endif
 }
 
-ScanTask::ScanTask(const Graph &graph)
-  : TaskLauncher(SCAN_TASK_ID, TaskArgument(NULL, 0))
+PullScanTask::PullScanTask(const Graph &graph)
+  : TaskLauncher(PULL_SCAN_TASK_ID, TaskArgument(NULL, 0))
 {
   // regions[0]: degrees
   {
@@ -245,9 +246,9 @@ ScanTask::ScanTask(const Graph &graph)
   }
 }
                    
-void load_task_impl(const Task *task,
-                    const std::vector<PhysicalRegion> &regions,
-                    Context ctx, Runtime* runtime)
+void pull_load_task_impl(const Task *task,
+                         const std::vector<PhysicalRegion> &regions,
+                         Context ctx, Runtime* runtime)
 {
 #ifdef EDGE_WEIGHT
   assert(regions.size() == 3);
@@ -314,9 +315,9 @@ void load_task_impl(const Task *task,
   fclose(fd);
 }
 
-void scan_task_impl(const Task *task,
-                    const std::vector<PhysicalRegion> &regions,
-                    Context ctx, Runtime* runtime)
+void pull_scan_task_impl(const Task *task,
+                         const std::vector<PhysicalRegion> &regions,
+                         Context ctx, Runtime* runtime)
 {
   assert(regions.size() == 2);
   assert(regions.size() == 2);
@@ -340,10 +341,11 @@ void scan_task_impl(const Task *task,
     degrees[raw_cols[e]] ++;
 }
 
-InitTask::InitTask(const Graph &graph,
-                   const IndexSpaceT<1> &domain,
-                   const ArgumentMap &arg_map)
-  : IndexLauncher(INIT_TASK_ID, domain, TaskArgument(&graph, sizeof(Graph)), arg_map)
+PullInitTask::PullInitTask(const Graph &graph,
+                           const IndexSpaceT<1> &domain,
+                           const ArgumentMap &arg_map)
+  : IndexLauncher(PULL_INIT_TASK_ID, domain,
+                  TaskArgument(&graph, sizeof(Graph)), arg_map)
 {
   // regions[0]: row_ptrs
   {
@@ -415,11 +417,11 @@ InitTask::InitTask(const Graph &graph,
 #endif
 }
 
-AppTask::AppTask(const Graph &graph,
-                 const IndexSpaceT<1> &domain,
-                 const ArgumentMap &arg_map,
-                 int iter)
-  : IndexLauncher(APP_TASK_ID, domain,
+PullAppTask::PullAppTask(const Graph &graph,
+                         const IndexSpaceT<1> &domain,
+                         const ArgumentMap &arg_map,
+                         int iter)
+  : IndexLauncher(PULL_APP_TASK_ID, domain,
                   TaskArgument(&iter, sizeof(int)), arg_map)
 {
   // regions[0]: row_ptrs
@@ -462,4 +464,55 @@ AppTask::AppTask(const Graph &graph,
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
+}
+
+static void update_mappers(Machine machine, Runtime *rt,
+                           const std::set<Processor> &local_procs)
+{
+  for (std::set<Processor>::const_iterator it = local_procs.begin();
+        it != local_procs.end(); it++)
+  {
+    rt->replace_default_mapper(new LuxMapper(machine, rt, *it), *it);
+  }
+}
+
+int main(int argc, char **argv)
+{
+  Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
+  {
+    TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
+  }
+  // Pull-based Load Task
+  {
+    TaskVariantRegistrar registrar(PULL_LOAD_TASK_ID, "load_task (pull)");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
+    Runtime::preregister_task_variant<pull_load_task_impl>(
+        registrar, "load_task (pull)");
+  }
+  {
+    TaskVariantRegistrar registrar(PULL_SCAN_TASK_ID, "scan_task (pull)");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
+    Runtime::preregister_task_variant<pull_scan_task_impl>(registrar, "scan_task (pull)");
+  }
+  {
+    TaskVariantRegistrar registrar(PULL_INIT_TASK_ID, "init_task (pull)");
+    registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
+    registrar.set_leaf();
+    Runtime::preregister_task_variant<GraphPiece, pull_init_task_impl>(
+        registrar, "init_task (pull)");
+  }
+  {
+    TaskVariantRegistrar registrar(PULL_APP_TASK_ID, "app_task (pull)");
+    registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
+    registrar.set_leaf();
+    Runtime::preregister_task_variant<pull_app_task_impl>(
+        registrar, "app_task (pull)");
+  }
+  Runtime::add_registration_callback(update_mappers);
+
+  return Runtime::start(argc, argv);
 }

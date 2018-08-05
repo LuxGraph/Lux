@@ -14,7 +14,8 @@
 #
 
 ifndef LG_RT_DIR
-$(error LG_RT_DIR variable is not defined, aborting build)
+#$(error LG_RT_DIR variable is not defined, aborting build)
+LG_RT_DIR		= ../legion/runtime
 endif
 
 # Flags for directing the runtime makefile what to include
@@ -29,8 +30,8 @@ ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 # Put the binary file name here
 OUTFILE		?= pagerank
 # List all the application source files here
-GEN_SRC		?= pagerank.cc ../lux_mapper.cc ../graph.cc		# .cc files
-GEN_GPU_SRC	?= pagerank_gpu.cu								# .cu files
+GEN_SRC		?= pagerank.cc ../core/lux_mapper.cc 		# .cc files
+GEN_GPU_SRC	?= pagerank_gpu.cu							# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?= -I../cub -I.

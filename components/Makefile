@@ -29,8 +29,8 @@ ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 # Put the binary file name here
 OUTFILE		?= components
 # List all the application source files here
-GEN_SRC		?= components.cc ../lux_mapper.cc 		# .cc files
-GEN_GPU_SRC	?= components_gpu.cu								# .cu files
+GEN_SRC		?= components.cc ../core/lux_mapper.cc 		# .cc files
+GEN_GPU_SRC	?= components_gpu.cu				# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?= -I../cub -I.

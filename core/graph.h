@@ -35,10 +35,10 @@ template<typename FT, int N, typename T = coord_t> using AccessorWO = FieldAcces
 
 enum {
   TOP_LEVEL_TASK_ID,
-  LOAD_TASK_ID,
-  SCAN_TASK_ID,
-  INIT_TASK_ID,
-  APP_TASK_ID,
+  PULL_LOAD_TASK_ID,
+  PULL_SCAN_TASK_ID,
+  PULL_INIT_TASK_ID,
+  PULL_APP_TASK_ID,
   PUSH_LOAD_TASK_ID,
   PUSH_INIT_TASK_ID,
   PUSH_APP_TASK_ID,
@@ -81,6 +81,7 @@ public:
   LogicalPartition frontier_lp[2];
   LogicalRegion dist_lr[2];
   LogicalPartition dist_lp[2];
+  bool verbose;
 };
 
 class GraphPiece
@@ -106,53 +107,53 @@ struct FrontierHeader
 // Tasks for Pull-based Execution
 // ----------------------------------------------------------------------------
 
-class LoadTask : public IndexLauncher
+class PullLoadTask : public IndexLauncher
 {
 public:
-  LoadTask(const Graph &graph,
-           const IndexSpaceT<1> &domain,
-           const ArgumentMap &arg_map,
-           std::string &fn);
+  PullLoadTask(const Graph &graph,
+               const IndexSpaceT<1> &domain,
+               const ArgumentMap &arg_map,
+               std::string &fn);
 };
 
-class ScanTask : public TaskLauncher
+class PullScanTask : public TaskLauncher
 {
 public:
-  ScanTask(const Graph &graph);
+  PullScanTask(const Graph &graph);
 };
 
-class InitTask : public IndexLauncher
+class PullInitTask : public IndexLauncher
 {
 public:
-  InitTask(const Graph &graph,
-           const IndexSpaceT<1> &domain,
-           const ArgumentMap &arg_map);
+  PullInitTask(const Graph &graph,
+               const IndexSpaceT<1> &domain,
+               const ArgumentMap &arg_map);
 };
 
-class AppTask : public IndexLauncher
+class PullAppTask : public IndexLauncher
 {
 public:
-  AppTask(const Graph &graph,
-          const IndexSpaceT<1> &domain,
-          const ArgumentMap &arg_map,
-          int iteration);
+  PullAppTask(const Graph &graph,
+              const IndexSpaceT<1> &domain,
+              const ArgumentMap &arg_map,
+              int iteration);
 };
 
-void load_task_impl(const Task *task,
-                    const std::vector<PhysicalRegion> &regions,
-                    Context ctx, Runtime *runtime);
+void pull_load_task_impl(const Task *task,
+                         const std::vector<PhysicalRegion> &regions,
+                         Context ctx, Runtime *runtime);
 
-void scan_task_impl(const Task *task,
-                    const std::vector<PhysicalRegion> &regions,
-                    Context ctx, Runtime *runtime);
+void pull_scan_task_impl(const Task *task,
+                         const std::vector<PhysicalRegion> &regions,
+                         Context ctx, Runtime *runtime);
 
-void app_task_impl(const Task *task,
-                   const std::vector<PhysicalRegion> &regions,
-                   Context ctx, Runtime *runtime);
+void pull_app_task_impl(const Task *task,
+                        const std::vector<PhysicalRegion> &regions,
+                        Context ctx, Runtime *runtime);
 
-GraphPiece init_task_impl(const Task *task,
-                          const std::vector<PhysicalRegion> &regions,
-                          Context ctx, Runtime *runtime);
+GraphPiece pull_init_task_impl(const Task *task,
+                               const std::vector<PhysicalRegion> &regions,
+                               Context ctx, Runtime *runtime);
 
 // ----------------------------------------------------------------------------
 // Tasks for Push-based Execution
