@@ -41,7 +41,7 @@ Running code
 The applications take an input graph as well as several runtime flags starting with `-ll:`. For example:
 ```
 ./pagerank -ll:gpu 4 -ll:fsize 12000 -ll:zsize 20000 -file twitter-2010.lux -ni 10
-./components -ll:gpu 1 -ll:fsize 6000 -ll:zsize 6000 -file indochina.lux
+./components -ll:gpu 1 -ll:fsize 6000 -ll:zsize 6000 -file indochina.lux -verbose -check
 ./sssp -ll:gpu 2 -ll:fsize 12000 -ll:zsize 20000 -file twitter-2010.lux -start 0
 ```
 * `-ll:gpu`: number of GPU processors to use in an execution 
@@ -50,6 +50,8 @@ The applications take an input graph as well as several runtime flags starting w
 * `-file`: path to the input graph
 * `-ni`: number of iterations to perform
 * `-start`: root vertex for SSSP
+* `-verbose`: show detailed task execution information
+* `-check`: perform correctness check after computation
 
 Graph Format
 ------------

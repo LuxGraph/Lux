@@ -760,8 +760,9 @@ void check_task_impl(const Task *task,
       piece->oldAllPrFb, numMistakes);
   checkCUDA(cudaDeviceSynchronize());
   if (*numMistakes == 0)
-    printf("Check task passed: rowLeft(%u)\n", rowLeft);
+    printf("[PASS] Check task: rowLeft(%u) numMistakes(%u)\n",
+           rowLeft, *numMistakes);
   else
-    printf("Check task failed: rowLeft(%u) numMistakes(%u)\n ",
+    printf("[FAIL] Check task: rowLeft(%u) numMistakes(%u)\n ",
            rowLeft, *numMistakes);
 }
