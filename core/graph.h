@@ -43,6 +43,7 @@ enum {
   PUSH_INIT_TASK_ID,
   PUSH_APP_TASK_ID,
   PUSH_INIT_VTX_TASK_ID,
+  CHECK_TASK_ID,
 };
 
 enum FieldIDs {
@@ -206,7 +207,17 @@ GraphPiece push_init_task_impl(const Task *task,
                                const std::vector<PhysicalRegion> &regions,
                                Context ctx, Runtime *runtime);
 
+// Tasks for Correctness Checks
+class CheckTask : public IndexLauncher
+{
+public:
+  CheckTask(const Graph &graph,
+            const IndexSpaceT<1> &domain,
+            const ArgumentMap &arg_map,
+            int iteration);
+};
 
-
-
+void check_task_impl(const Task *task,
+                     const std::vector<PhysicalRegion> &regions,
+                     Context ctx, Runtime* runtime);
 #endif

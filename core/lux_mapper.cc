@@ -100,7 +100,9 @@ void LuxMapper::slice_task(const MapperContext ctx,
                                 SliceTaskOutput& output)
 {
   if (task.task_id == PULL_APP_TASK_ID || task.task_id == PULL_INIT_TASK_ID
-    ||task.task_id == PUSH_APP_TASK_ID || task.task_id == PUSH_INIT_TASK_ID) {
+    ||task.task_id == PUSH_APP_TASK_ID || task.task_id == PUSH_INIT_TASK_ID
+    ||task.task_id == CHECK_TASK_ID)
+  {
     if (gpuSlices.size() > 0) {
       output.slices = gpuSlices;
       return;

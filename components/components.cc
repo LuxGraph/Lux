@@ -23,7 +23,7 @@ LegionRuntime::Logger::Category log_cc("cc");
 LegionRuntime::Logger::Category log_lux("lux");
 
 void parse_input_args(char **argv, int argc, int &num_gpu,
-                      std::string &file_name, bool &verbose);
+                      std::string &file_name, bool &verbose, bool &check);
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
@@ -32,11 +32,12 @@ void top_level_task(const Task *task,
   int numGPU = 0;
   std::string filename;
   bool verbose = false;
+  bool check = false;
   {
     const InputArgs &command_args = HighLevelRuntime::get_input_args();
     char **argv = command_args.argv;
     int argc = command_args.argc;
-    parse_input_args(argv, argc, numGPU, filename, verbose);
+    parse_input_args(argv, argc, numGPU, filename, verbose, check);
     log_cc.print("CC settings: numPartitions(%d) filename(%s)",
                  numGPU, filename.c_str());
     if (numGPU <= 0) {
@@ -99,10 +100,19 @@ void top_level_task(const Task *task,
   future.get_void_result();
   log_cc.print("Finish Connected Components computation...");
   printf("ELAPSED TIME = %7.7f s\n", sim_time);
+
+  //check tasks
+  if (check) {
+    CheckTask check_task(graph, task_is, local_args, iter);
+    fm = runtime->execute_index_space(ctx, check_task);
+    fm.wait_all_results();
+    log_cc.print("Correctness check completed...");
+  }
 }
 
 void parse_input_args(char **argv, int argc,
-                      int &numGPU, std::string &filename, bool &verbose)
+                      int &numGPU, std::string &filename,
+                      bool &verbose, bool &check)
 {
   for (int i = 1; i < argc; i++) 
   {
@@ -116,9 +126,14 @@ void parse_input_args(char **argv, int argc,
       filename = std::string(argv[++i]);
       continue;
     }
-    if ((!strcmp(argv[i], "-verbose")) || (!strcmp(argv[i], "-verbose")))
+    if ((!strcmp(argv[i], "-verbose")) || (!strcmp(argv[i], "-v")))
     {
       verbose = true;
+      continue;
+    }
+    if ((!strcmp(argv[i], "-check")) || (!strcmp(argv[i], "-c")))
+    {
+      check = true;
       continue;
     }
   }

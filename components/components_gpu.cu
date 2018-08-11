@@ -466,15 +466,16 @@ V_ID push_app_task_impl(const Task *task,
                          cudaMemcpyDeviceToHost));
     if (newFqHeader->numNodes < maxNumNodes) {
       // copy piece->newFqFb to piece->oldFqFb
-      checkCUDA(cudaMemcpyAsync(piece->oldFqFb, piece->newFqFb,
+      checkCUDA(cudaMemcpy(piece->oldFqFb, piece->newFqFb,
                            fqRight - fqLeft + 1,
                            cudaMemcpyDeviceToDevice));
-      checkCUDA(cudaMemsetAsync(piece->newFqFb, 0, sizeof(FrontierHeader)));
+      checkCUDA(cudaMemset(piece->newFqFb, 0, sizeof(FrontierHeader)));
       numBlocks = GET_BLOCKS(rowRight - rowLeft + 1);
       denseFq = false;
       convert_d2s_kernel<<<numBlocks, CUDA_NUM_THREADS>>>(
           rowLeft, rowRight, piece->oldFqFb, piece->newFqFb);
-      checkCUDA(cudaMemcpyAsync(newFqHeader, piece->newFqFb, sizeof(FrontierHeader),
+      checkCUDA(cudaDeviceSynchronize());
+      checkCUDA(cudaMemcpy(newFqHeader, piece->newFqFb, sizeof(FrontierHeader),
                            cudaMemcpyDeviceToHost));
     }
   } else {
@@ -503,22 +504,25 @@ V_ID push_app_task_impl(const Task *task,
                          piece->newFqFb + sizeof(FrontierHeader),
                          sizeof(Vertex) * newFqHeader->numNodes,
                          cudaMemcpyDeviceToHost));
-    int numBlocks = GET_BLOCKS(newFqHeader->numNodes);
-    if (numBlocks > 0) {
-      copy_kernel<<<numBlocks, CUDA_NUM_THREADS>>>(
-          newFqHeader->numNodes, rowLeft, piece->newFqFb, piece->newPrFb, new_pr);
-    }
+    checkCUDA(cudaMemcpy(new_pr, piece->newPrFb,
+                         (rowRight - rowLeft + 1) * sizeof(Vertex),
+                         cudaMemcpyDeviceToHost));
+    //int numBlocks = GET_BLOCKS(newFqHeader->numNodes);
+    //if (numBlocks > 0) {
+    //  copy_kernel<<<numBlocks, CUDA_NUM_THREADS>>>(
+    //      newFqHeader->numNodes, rowLeft, piece->newFqFb, piece->newPrFb, new_pr);
+    //}
   }
   checkCUDA(cudaDeviceSynchronize());
   double ts_end = Realm::Clock::current_time_in_microseconds();
   newFqHeader->type = denseFq ? FrontierHeader::DENSE_BITMAP
                               : FrontierHeader::SPARSE_QUEUE;
   if (graph->verbose)
-    printf("rowLeft(%u) activeNodes(%u) loadTime(%.0lf) compTime(%.0lf) updateTime(%.0lf)",
+    printf("rowLeft(%u) activeNodes(%u) loadTime(%.0lf) compTime(%.0lf) updateTime(%.0lf)\n",
            rowLeft, newFqHeader->numNodes, cp0 - ts_start, cp1 - cp0, ts_end - cp1);
+  //for (V_ID n = 0; n < 5; n++) printf("oldPr[%u]: %u\n", n + rowLeft, old_pr[n + rowLeft]);
+  //for (V_ID n = 0; n < 5; n++) printf("newPr[%u]: %u\n", n + rowLeft, new_pr[n]);
   return newFqHeader->numNodes;
-  //for (V_ID n = 0; n < 10; n++) printf("oldPr[%u]: %u\n", n + rowLeft, old_pr[n + rowLeft]);
-  //for (V_ID n = 0; n < 10; n++) printf("newPr[%u]: %u\n", n + rowLeft, new_pr[n]);
 }
 
 __global__
@@ -692,3 +696,72 @@ GraphPiece push_init_task_impl(const Task *task,
   return piece;
 }
 
+__global__
+void check_kernel(V_ID rowLeft,
+                  V_ID rowRight,
+                  E_ID colLeft,
+                  const NodeStruct* pull_row_ptrs,
+                  const EdgeStruct2* pull_col_idxs,
+                  const Vertex* labels,
+                  V_ID* numMistakes)
+{
+  for (V_ID n = blockIdx.x * blockDim.x + threadIdx.x;
+       n + rowLeft <= rowRight; n += blockDim.x * gridDim.x)
+  {
+    E_ID startColIdx, endColIdx = pull_row_ptrs[n].index;
+    V_ID dstVtx = n + rowLeft;
+    if (n == 0)
+      startColIdx = colLeft;
+    else
+      startColIdx = pull_row_ptrs[n - 1].index;
+    for (E_ID e = startColIdx; e < endColIdx; e++) {
+      V_ID srcVtx = pull_col_idxs[e - colLeft].src;
+      if (labels[dstVtx] > labels[srcVtx])
+        atomicAdd(numMistakes, 1);
+    }
+  }
+}
+
+void check_task_impl(const Task *task,
+                     const std::vector<PhysicalRegion> &regions,
+                     Context ctx, Runtime* runtime)
+{
+  assert(regions.size() == 3);
+  assert(regions.size() == 3);
+  const Graph* graph = (Graph*) task->args;
+  const GraphPiece *piece = (GraphPiece*) task->local_args;
+
+  const AccessorRO<NodeStruct, 1> acc_pull_row_ptr(regions[0], FID_DATA);
+  const AccessorRO<EdgeStruct2, 1> acc_pull_col_idx(regions[1], FID_DATA);
+  const AccessorRO<Vertex, 1> acc_pr(regions[2], FID_DATA);
+  Rect<1> rect_pull_row_ptr = runtime->get_index_space_domain(
+                             ctx, task->regions[0].region.get_index_space());
+  Rect<1> rect_pull_col_idx = runtime->get_index_space_domain(
+                             ctx, task->regions[1].region.get_index_space());
+  Rect<1> rect_pr = runtime->get_index_space_domain(
+                            ctx, task->regions[2].region.get_index_space());
+  assert(acc_pull_row_ptr.accessor.is_dense_arbitrary(rect_pull_row_ptr));
+  assert(acc_pull_col_idx.accessor.is_dense_arbitrary(rect_pull_col_idx));
+  assert(acc_pr.accessor.is_dense_arbitrary(rect_pr));
+  const NodeStruct* pull_row_ptrs = acc_pull_row_ptr.ptr(rect_pull_row_ptr);
+  const EdgeStruct2* pull_col_idxs = acc_pull_col_idx.ptr(rect_pull_col_idx);
+  const Vertex* pr = acc_pr.ptr(rect_pr);
+  V_ID rowLeft = rect_pull_row_ptr.lo[0], rowRight = rect_pull_row_ptr.hi[0];
+  E_ID colLeft = rect_pull_col_idx.lo[0], colRight = rect_pull_col_idx.hi[0];
+  V_ID *numMistakes;
+  checkCUDA(cudaHostAlloc(&numMistakes, sizeof(V_ID),
+                          cudaHostAllocPortable | cudaHostAllocMapped));
+  *numMistakes = 0;
+  load_kernel<<<GET_BLOCKS(graph->nv), CUDA_NUM_THREADS>>>(
+      graph->nv, piece->oldAllPrFb, pr);
+  // check correctness
+  check_kernel<<<GET_BLOCKS(rowRight - rowLeft + 1), CUDA_NUM_THREADS>>>(
+      rowLeft, rowRight, colLeft, pull_row_ptrs, pull_col_idxs,
+      piece->oldAllPrFb, numMistakes);
+  checkCUDA(cudaDeviceSynchronize());
+  if (*numMistakes == 0)
+    printf("Check task passed: rowLeft(%u)\n", rowLeft);
+  else
+    printf("Check task failed: rowLeft(%u) numMistakes(%u)\n ",
+           rowLeft, *numMistakes);
+}

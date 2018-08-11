@@ -202,7 +202,7 @@ PushAppTask::PushAppTask(const Graph &graph,
   // regions[0]: pull_row_ptrs
   {
     RegionRequirement rr(graph.pull_row_ptr_lp, 0/*identity*/,
-                         WRITE_ONLY, EXCLUSIVE, graph.pull_row_ptr_lr,
+                         READ_ONLY, EXCLUSIVE, graph.pull_row_ptr_lr,
                          MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
@@ -210,7 +210,7 @@ PushAppTask::PushAppTask(const Graph &graph,
   // regions[1]: pull_col_idxs
   {
     RegionRequirement rr(graph.pull_col_idx_lp, 0/*identity*/,
-                         WRITE_ONLY, EXCLUSIVE, graph.pull_col_idx_lr,
+                         READ_ONLY, EXCLUSIVE, graph.pull_col_idx_lr,
                          MAP_TO_FB_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
@@ -259,6 +259,39 @@ PushAppTask::PushAppTask(const Graph &graph,
   {
     RegionRequirement rr(graph.dist_lp[(iter+1)%2], 0/*identity*/,
                          WRITE_ONLY, EXCLUSIVE, graph.dist_lr[(iter+1)%2],
+                         MAP_TO_ZC_MEMORY);
+    rr.add_field(FID_DATA);
+    add_region_requirement(rr);
+  }
+}
+
+CheckTask::CheckTask(const Graph &graph,
+                     const IndexSpaceT<1> &domain,
+                     const ArgumentMap &arg_map,
+                     int iter)
+  : IndexLauncher(CHECK_TASK_ID, domain,
+                  TaskArgument(&graph, sizeof(Graph)), arg_map)
+{
+  // regions[0]: pull_row_ptrs
+  {
+    RegionRequirement rr(graph.pull_row_ptr_lp, 0/*identity*/,
+                         READ_ONLY, EXCLUSIVE, graph.pull_row_ptr_lr,
+                         MAP_TO_FB_MEMORY);
+    rr.add_field(FID_DATA);
+    add_region_requirement(rr);
+  }
+  // regions[1]: pull_col_idxs
+  {
+    RegionRequirement rr(graph.pull_col_idx_lp, 0/*identity*/,
+                         READ_ONLY, EXCLUSIVE, graph.pull_col_idx_lr,
+                         MAP_TO_FB_MEMORY);
+    rr.add_field(FID_DATA);
+    add_region_requirement(rr);
+  }
+  // regions[2]: old_pr
+  {
+    RegionRequirement rr(graph.dist_lr[iter%2], 0/*identity*/,
+                         READ_ONLY, EXCLUSIVE, graph.dist_lr[iter%2],
                          MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
@@ -521,6 +554,14 @@ int main(int argc, char **argv)
     Runtime::preregister_task_variant<V_ID, push_app_task_impl>(
         registrar, "app_task (push)");
   }
+  {
+    TaskVariantRegistrar registrar(CHECK_TASK_ID, "check_task");
+    registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
+    registrar.set_leaf();
+    Runtime::preregister_task_variant<check_task_impl>(
+        registrar, "check_task");
+  }
+
   Runtime::add_registration_callback(update_mappers);
 
   return Runtime::start(argc, argv);
