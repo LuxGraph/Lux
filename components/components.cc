@@ -52,10 +52,43 @@ void top_level_task(const Task *task,
 
   Graph graph(ctx, runtime, numGPU, filename);
   graph.verbose = verbose;
+  Rect<1> task_rect(0, graph.numParts - 1);
+
+  // First we compute and print memory requriements
+  size_t max_zc_usage = 0, max_fb_usage = 0, max_num_edges = 0;
+  for (PointInRectIterator<1> it(task_rect); it(); it++) {
+    size_t fb_usage = 0;
+    LogicalRegion col_idx = runtime->get_logical_subregion_by_color(
+                                ctx, graph.pull_col_idx_lp, DomainPoint(*it));
+    LogicalRegion row_ptr = runtime->get_logical_subregion_by_color(
+                                ctx, graph.pull_row_ptr_lp, DomainPoint(*it));
+    Rect<1> r = runtime->get_index_space_domain(ctx,
+                    col_idx.get_index_space());
+    size_t myNumEdges = r.hi[0] - r.lo[0] + 1;
+    r = runtime->get_index_space_domain(ctx, row_ptr.get_index_space());
+    size_t myNumNodes = r.hi[0] - r.lo[0] + 1;
+    fb_usage = myNumEdges * sizeof(EdgeStruct2) //pull_col_idxs
+               + myNumEdges * sizeof(EdgeStruct) //push_col_idxs
+               + myNumNodes * sizeof(NodeStruct) //pull_raw_rows
+               + graph.nv * sizeof(NodeStruct) //push_raw_rows
+               + myNumNodes * 2 * sizeof(Vertex) //newPrFb+oldPrFb
+               + graph.nv * sizeof(Vertex)   //allPrFb
+               + graph.frontierSize * 2; //newFqFb+oldFqFb
+    max_fb_usage = fb_usage > max_fb_usage ? fb_usage : max_fb_usage;
+    max_num_edges = myNumEdges > max_num_edges ? myNumEdges : max_num_edges;
+  }
+  max_zc_usage = graph.ne * sizeof(V_ID) //raw_cols
+                 + graph.nv * sizeof(E_ID) //raw_rows
+                 + graph.nv * 2 * sizeof(Vertex) //new_pr+old_pr
+                 + graph.frontierSize * 2 //new_fq+old_fq
+                 + graph.nv * sizeof(NodeStruct) //temp_memory
+                 + max_num_edges * sizeof(EdgeStruct); //temp_memory
+
+  printf("[Memory Setting] Set ll:fsize >= %zuMB and ll:zsize >= %zuMB\n",
+          max_fb_usage / 1024 / 1024 + 1, max_zc_usage / 1024 / 1024 + 1);
 
   ArgumentMap local_args;
   // Init phase
-  Rect<1> task_rect(0, graph.numParts - 1);
   IndexSpaceT<1> task_is = runtime->create_index_space(ctx, task_rect);
   PushLoadTask load_task(graph, task_is, local_args, filename);
   FutureMap fm = runtime->execute_index_space(ctx, load_task);

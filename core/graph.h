@@ -98,10 +98,10 @@ public:
 
 struct FrontierHeader
 {
-  static const V_ID DENSE_BITMAP = 0x12345678;
-  static const V_ID SPARSE_QUEUE = 0x87654321;
-  V_ID numNodes;
+  static const V_ID DENSE_BITMAP = 0x1234567;
+  static const V_ID SPARSE_QUEUE = 0x7654321;
   V_ID type;
+  V_ID numNodes;
 };
 
 // ----------------------------------------------------------------------------
@@ -120,7 +120,9 @@ public:
 class PullScanTask : public TaskLauncher
 {
 public:
-  PullScanTask(const Graph &graph);
+  PullScanTask(const Graph &graph,
+               Context ctx,
+               Runtime* runtime);
 };
 
 class PullInitTask : public IndexLauncher

@@ -391,8 +391,8 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
       rowLeft[count] = left_bound;
       rowRight[count] = v;
       fqLeft[count] = frontierSize;
-      // 10 extra slots to handle concer cases
-      V_ID mySlots = (rowRight[count] - rowLeft[count]) / SPARSE_THRESHOLD + 10;
+      // 100 extra slots to handle corner cases
+      V_ID mySlots = (rowRight[count] - rowLeft[count]) / SPARSE_THRESHOLD + 100;
       frontierSize += sizeof(FrontierHeader) + mySlots * sizeof(V_ID);
       fqRight[count] = frontierSize - 1;
       count++;
@@ -405,13 +405,13 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
     rowLeft[count] = left_bound;
     rowRight[count] = nv - 1;
     fqLeft[count] = frontierSize;
-    // 10 extra slots to handle concer cases
-    V_ID mySlots = (rowRight[count] - rowLeft[count]) / SPARSE_THRESHOLD + 10;
+    // 100 extra slots to handle corner cases
+    V_ID mySlots = (rowRight[count] - rowLeft[count]) / SPARSE_THRESHOLD + 100;
     frontierSize += sizeof(FrontierHeader) + mySlots * sizeof(V_ID);
     fqRight[count] = frontierSize - 1;
     count++;
   }
-  // Make logial regions for frontier queues
+  // Make logical regions for frontier queues
   Rect<1> frontier_rect(Point<1>(0), Point<1>(frontierSize-1));
   IndexSpaceT<1> frontier_is =
     runtime->create_index_space(ctx, frontier_rect);

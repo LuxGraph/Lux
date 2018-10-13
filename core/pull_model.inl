@@ -225,7 +225,8 @@ PullLoadTask::PullLoadTask(const Graph &graph,
 #endif
 }
 
-PullScanTask::PullScanTask(const Graph &graph)
+PullScanTask::PullScanTask(const Graph &graph,
+                           Context ctx, Runtime* runtime)
   : TaskLauncher(PULL_SCAN_TASK_ID, TaskArgument(NULL, 0))
 {
   // regions[0]: degrees
@@ -236,16 +237,19 @@ PullScanTask::PullScanTask(const Graph &graph)
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
-  // regions[1]: raw_cols
-  {
-    RegionRequirement rr(graph.raw_col_lr,
+  // regions[1..numParts]: raw_cols[i]
+  Rect<1> task_rect(0, graph.numParts - 1);
+  for (PointInRectIterator<1> it(task_rect); it(); it++) {
+    LogicalRegion raw_col = runtime->get_logical_subregion_by_color(
+                                ctx, graph.raw_col_lp, DomainPoint(*it));
+    RegionRequirement rr(raw_col,
                          READ_ONLY, EXCLUSIVE, graph.raw_col_lr,
                          MAP_TO_ZC_MEMORY);
     rr.add_field(FID_DATA);
     add_region_requirement(rr);
   }
 }
-                   
+
 void pull_load_task_impl(const Task *task,
                          const std::vector<PhysicalRegion> &regions,
                          Context ctx, Runtime* runtime)
@@ -319,26 +323,25 @@ void pull_scan_task_impl(const Task *task,
                          const std::vector<PhysicalRegion> &regions,
                          Context ctx, Runtime* runtime)
 {
-  assert(regions.size() == 2);
-  assert(regions.size() == 2);
   const AccessorWO<V_ID, 1> acc_degrees(regions[0], FID_DATA);
-  const AccessorRO<V_ID, 1> acc_raw_cols(regions[1], FID_DATA);
   Rect<1> rect_degrees = runtime->get_index_space_domain(
                              ctx, task->regions[0].region.get_index_space());
-  Rect<1> rect_raw_cols = runtime->get_index_space_domain(
-                              ctx, task->regions[1].region.get_index_space());
   V_ID rowLeft = rect_degrees.lo[0], rowRight = rect_degrees.hi[0];
-  E_ID colLeft = rect_raw_cols.lo[0], colRight = rect_raw_cols.hi[0];
   assert(rowLeft == 0);
-  assert(colLeft == 0);
   assert(acc_degrees.accessor.is_dense_arbitrary(rect_degrees));
-  assert(acc_raw_cols.accessor.is_dense_arbitrary(rect_raw_cols));
   V_ID* degrees = acc_degrees.ptr(rect_degrees.lo);
-  const V_ID* raw_cols = acc_raw_cols.ptr(rect_raw_cols.lo);
   for (V_ID n = rowLeft; n <= rowRight; n++)
     degrees[n] = 0;
-  for (E_ID e = colLeft; e <= colRight; e++)
-    degrees[raw_cols[e]] ++;
+  for (unsigned i = 1; i < regions.size(); i++) {
+    const AccessorRO<V_ID, 1> acc_raw_col(regions[i], FID_DATA);
+    Rect<1> rect_raw_col = runtime->get_index_space_domain(
+                               ctx, task->regions[i].region.get_index_space());
+    E_ID colLeft = rect_raw_col.lo[0], colRight = rect_raw_col.hi[0];
+    assert(acc_raw_col.accessor.is_dense_arbitrary(rect_raw_col));
+    const V_ID* raw_col = acc_raw_col.ptr(rect_raw_col.lo);
+    for (E_ID e = colLeft; e <= colRight; e++)
+      degrees[raw_col[e - colLeft]] ++;
+  }
 }
 
 PullInitTask::PullInitTask(const Graph &graph,

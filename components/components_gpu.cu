@@ -633,13 +633,15 @@ GraphPiece push_init_task_impl(const Task *task,
   assert(memZC.begin()->kind() == Memory::Z_COPY_MEM);
   Realm::MemoryImpl* memImpl =
     Realm::get_runtime()->get_memory_impl(*memZC.begin());
-  Realm::LocalCPUMemory* memZCImpl = (Realm::LocalCPUMemory*) memImpl;
+  Realm::Cuda::GPUZCMemory* memZCImpl = (Realm::Cuda::GPUZCMemory*) memImpl;
   off_t offset = memZCImpl->alloc_bytes(sizeof(NodeStruct) * graph->nv);
   assert(offset >= 0);
   NodeStruct* nodes = (NodeStruct*) memZCImpl->get_direct_ptr(offset, 0);
+  //NodeStruct* nodes = (NodeStruct*) malloc(sizeof(NodeStruct) * graph->nv);
   off_t offset2 = memZCImpl->alloc_bytes(sizeof(EdgeStruct) * (colRight - colLeft + 1));
   assert(offset2 >= 0);
   EdgeStruct* dsts = (EdgeStruct*) memZCImpl->get_direct_ptr(offset2, 0);
+  //EdgeStruct* dsts = (EdgeStruct*) malloc(sizeof(EdgeStruct) * (colRight - colLeft + 1));
   E_ID cur = colLeft;
   for (V_ID n = 0; n < graph->nv; n++) {
     while ((cur <= colRight ) && (edges[cur - colLeft].src <= n))
@@ -655,9 +657,11 @@ GraphPiece push_init_task_impl(const Task *task,
                        cudaMemcpyHostToDevice));
   memZCImpl->free_bytes(offset, sizeof(NodeStruct) * graph->nv);
   memZCImpl->free_bytes(offset2, sizeof(EdgeStruct) * (colRight - colLeft + 1));
+  //free(nodes);
+  //free(dsts);
   FrontierHeader* header = (FrontierHeader*) frontier;
   header->type = FrontierHeader::DENSE_BITMAP;
-  header->numNodes = graph->nv;
+  header->numNodes = rowRight - rowLeft + 1;
   char* bitmap = frontier + sizeof(FrontierHeader);
   memset(bitmap, 0xFF, (rowRight - rowLeft) / 8 + 1);
   for (V_ID n = rowLeft; n <= rowRight; n++)
