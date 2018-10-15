@@ -490,8 +490,8 @@ Graph::Graph(Context ctx, HighLevelRuntime *runtime,
       log_lux.print("rowLeft = %u rowRight = %u",
                     rowLeft[color], rowRight[color]);
       LegionRuntime::Arrays::Rect<1> subrect(
-          LegionRuntime::Arrays::Point<1>(index),
-          LegionRuntime::Arrays::Point<1>(raw_rows[rowRight[color]]- 1));
+          LegionRuntime::Arrays::Point<1>((uint64_t)index),
+          LegionRuntime::Arrays::Point<1>((uint64_t)raw_rows[rowRight[color]]- 1));
       index = raw_rows[rowRight[color]];
       edges_coloring[color] = Domain::from_rect<1>(subrect);
     }

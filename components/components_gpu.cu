@@ -24,6 +24,8 @@
 const int CUDA_NUM_THREADS = 512;
 const int BLOCK_SIZE_LIMIT = 32768;
 
+typedef unsigned long long int DegreeType;
+
 // CUDA: number of blocks for threads.
 inline int GET_BLOCKS(const int N)
 {
@@ -52,9 +54,9 @@ void process_edge_dense(const EdgeStruct* colIdxs,
 {
   EdgeStruct dst = cub::ThreadLoad<cub::LOAD_CG>(colIdxs + colIdx);
   Vertex oldLabel = cub::ThreadLoad<cub::LOAD_CG>(myNewPrFb + dst - myRowLeft);
-  if (newLabel < oldLabel) {
+  if (newLabel > oldLabel) {
     //atomicMin(&myNewPrFb[dst - myRowLeft], newLabel);
-    atomicMin(myNewPrFb + dst - myRowLeft, newLabel);
+    atomicMax(myNewPrFb + dst - myRowLeft, newLabel);
   }
 }
 
@@ -70,9 +72,9 @@ bool process_edge_sparse(const EdgeStruct* colIdxs,
   EdgeStruct es = cub::ThreadLoad<cub::LOAD_CG>(colIdxs + colIdx);
   dstVtx = es;
   Vertex oldLabel = cub::ThreadLoad<cub::LOAD_CG>(myNewPrFb + dstVtx - myRowLeft);
-  if (newLabel < oldLabel) {
+  if (newLabel > oldLabel) {
     Vertex lastLabel = cub::ThreadLoad<cub::LOAD_CG>(myOldPrFb + dstVtx - myRowLeft);
-    Vertex actOldLabel = atomicMin(myNewPrFb + dstVtx - myRowLeft, newLabel);
+    Vertex actOldLabel = atomicMax(myNewPrFb + dstVtx - myRowLeft, newLabel);
     if (actOldLabel == lastLabel)
       return true;
   }
@@ -117,7 +119,7 @@ void cc_pull_kernel(V_ID rowLeft,
       if (threadIdx.x < totalNumEdges) {
         EdgeStruct2 es = col_idxs[blkColStart + done + threadIdx.x - colLeft];
         Vertex srcLabel = old_pr_fb[es.src];
-        atomicMin(new_pr_fb + es.dst - rowLeft, srcLabel);
+        atomicMax(new_pr_fb + es.dst - rowLeft, srcLabel);
       }
       done += CUDA_NUM_THREADS;
       totalNumEdges -= (totalNumEdges > CUDA_NUM_THREADS) ? 
@@ -474,7 +476,6 @@ V_ID push_app_task_impl(const Task *task,
       denseFq = false;
       convert_d2s_kernel<<<numBlocks, CUDA_NUM_THREADS>>>(
           rowLeft, rowRight, piece->oldFqFb, piece->newFqFb);
-      checkCUDA(cudaDeviceSynchronize());
       checkCUDA(cudaMemcpy(newFqHeader, piece->newFqFb, sizeof(FrontierHeader),
                            cudaMemcpyDeviceToHost));
     }
@@ -507,11 +508,6 @@ V_ID push_app_task_impl(const Task *task,
     checkCUDA(cudaMemcpy(new_pr, piece->newPrFb,
                          (rowRight - rowLeft + 1) * sizeof(Vertex),
                          cudaMemcpyDeviceToHost));
-    //int numBlocks = GET_BLOCKS(newFqHeader->numNodes);
-    //if (numBlocks > 0) {
-    //  copy_kernel<<<numBlocks, CUDA_NUM_THREADS>>>(
-    //      newFqHeader->numNodes, rowLeft, piece->newFqFb, piece->newPrFb, new_pr);
-    //}
   }
   checkCUDA(cudaDeviceSynchronize());
   double ts_end = Realm::Clock::current_time_in_microseconds();
@@ -526,13 +522,13 @@ V_ID push_app_task_impl(const Task *task,
 }
 
 __global__
-void init_kernel(V_ID rowLeft,
-                 V_ID rowRight,
-                 E_ID colLeft,
-                 NodeStruct* pull_row_ptrs,
-                 EdgeStruct2* pull_col_idxs,
-                 const E_ID* raw_rows,
-                 const V_ID* raw_cols)
+void init_pull_kernel(V_ID rowLeft,
+                      V_ID rowRight,
+                      E_ID colLeft,
+                      NodeStruct* pull_row_ptrs,
+                      EdgeStruct2* pull_col_idxs,
+                      const E_ID* raw_rows,
+                      const V_ID* raw_cols)
 {
   for (V_ID n = blockIdx.x * blockDim.x + threadIdx.x;
        n + rowLeft <= rowRight; n += blockDim.x * gridDim.x)
@@ -551,10 +547,69 @@ void init_kernel(V_ID rowLeft,
   }
 }
 
-static inline bool compareLess(const EdgeStruct2& a, const EdgeStruct2& b)
+__global__
+void init_push_row_ptrs(V_ID nv,
+                        E_ID colLeft,
+                        DegreeType* outDegrees,
+                        NodeStruct* push_row_ptrs)
 {
-  return a.src < b.src;
+  for (V_ID n = blockIdx.x * blockDim.x + threadIdx.x;
+       n == 0; n += blockDim.x * gridDim.x)
+  {
+    E_ID partialSum = colLeft;
+    for (V_ID i = 0; i < nv; i++) {
+      partialSum += outDegrees[i];
+      push_row_ptrs[i].index = partialSum;
+    }
+  }
 }
+
+__global__
+void init_push_col_idxs(V_ID rowLeft,
+                        V_ID rowRight,
+                        E_ID colLeft,
+                        DegreeType* outDegrees,
+                        NodeStruct* push_row_ptrs,
+                        EdgeStruct* push_col_idxs,
+                        const E_ID* raw_rows,
+                        const V_ID* raw_cols)
+{
+  for (V_ID n = blockIdx.x * blockDim.x + threadIdx.x;
+       n + rowLeft <= rowRight; n += blockDim.x * gridDim.x)
+  {
+    E_ID startColIdx, endColIdx = raw_rows[n];
+    if (n == 0)
+      startColIdx = colLeft;
+    else
+      startColIdx = raw_rows[n - 1];
+    for (E_ID e = startColIdx; e < endColIdx; e++)
+    {
+      V_ID src = raw_cols[e - colLeft];
+      E_ID colIdx = (src == 0) ? 0 : push_row_ptrs[src-1].index;
+      E_ID offset = atomicAdd(outDegrees + src, 1);
+      push_col_idxs[colIdx + offset - colLeft] = n + rowLeft;
+    }
+  }
+}
+
+__global__
+void init_push_kernel(E_ID colLeft,
+                      E_ID colRight,
+                      DegreeType* outDegree,
+                      const V_ID* raw_cols)
+{
+  for (E_ID n = blockIdx.x * blockDim.x + threadIdx.x;
+       n + colLeft <= colRight; n += blockDim.x * gridDim.x)
+  {
+    V_ID src = raw_cols[n];
+    atomicAdd(outDegree + src, 1);
+  }
+}
+
+//static inline bool compareLess(const EdgeStruct2& a, const EdgeStruct2& b)
+//{
+//  return a.src < b.src;
+//}
 
 GraphPiece push_init_task_impl(const Task *task,
                                const std::vector<PhysicalRegion> &regions,
@@ -588,7 +643,7 @@ GraphPiece push_init_task_impl(const Task *task,
                               ctx, task->regions[6].region.get_index_space());
   Rect<1> rect_raw_cols = runtime->get_index_space_domain(
                               ctx, task->regions[7].region.get_index_space());
-
+  assert(graph->nv == rect_push_row_ptr.hi[0] - rect_push_row_ptr.lo[0] + 1);
   assert(acc_pull_row_ptr.accessor.is_dense_arbitrary(rect_pull_row_ptr));
   assert(acc_pull_col_idx.accessor.is_dense_arbitrary(rect_pull_col_idx));
   assert(acc_push_row_ptr.accessor.is_dense_arbitrary(rect_push_row_ptr));
@@ -609,56 +664,72 @@ GraphPiece push_init_task_impl(const Task *task,
   V_ID rowLeft = rect_raw_rows.lo[0], rowRight = rect_raw_rows.hi[0];
   E_ID colLeft = rect_pull_col_idx.lo[0], colRight = rect_pull_col_idx.hi[0];
   // Init pull_row_ptrs and pull_col_idxs
-  init_kernel<<<GET_BLOCKS(rowRight - rowLeft + 1), CUDA_NUM_THREADS>>>(
+  init_pull_kernel<<<GET_BLOCKS(rowRight - rowLeft + 1), CUDA_NUM_THREADS>>>(
       rowLeft, rowRight, colLeft, pull_row_ptrs, pull_col_idxs,
       raw_rows, raw_cols);
   checkCUDA(cudaDeviceSynchronize());
   // Init push_row_ptrs and push_col_idxs
-  std::vector<EdgeStruct2> edges(colRight - colLeft + 1);
-  E_ID startColIdx = colLeft;
-  for (V_ID n = rowLeft; n <= rowRight; n++) {
-    E_ID endColIdx = raw_rows[n - rowLeft];
-    for (E_ID e = startColIdx; e < endColIdx; e++) {
-      edges[e - colLeft].src = raw_cols[e - colLeft];
-      edges[e - colLeft].dst = n;
-    }
-    startColIdx = endColIdx;
-  }
-  std::sort(edges.begin(), edges.end(), compareLess);
-  assert(graph->nv == rect_push_row_ptr.hi[0] - rect_push_row_ptr.lo[0] + 1);
-  // Allocate nodes on the same memory as new_pr
-  std::set<Memory> memZC;
-  regions[5].get_memories(memZC);
-  assert(memZC.size() == 1);
-  assert(memZC.begin()->kind() == Memory::Z_COPY_MEM);
+  std::set<Memory> memFB;
+  regions[0].get_memories(memFB);
+  assert(memFB.size() == 1);
+  assert(memFB.begin()->kind() == Memory::GPU_FB_MEM);
   Realm::MemoryImpl* memImpl =
-    Realm::get_runtime()->get_memory_impl(*memZC.begin());
-  Realm::Cuda::GPUZCMemory* memZCImpl = (Realm::Cuda::GPUZCMemory*) memImpl;
-  off_t offset = memZCImpl->alloc_bytes(sizeof(NodeStruct) * graph->nv);
+      Realm::get_runtime()->get_memory_impl(*memFB.begin());
+  Realm::Cuda::GPUFBMemory* memFBImpl = (Realm::Cuda::GPUFBMemory*) memImpl;
+  off_t offset = memFBImpl->alloc_bytes(sizeof(DegreeType) * graph->nv);
   assert(offset >= 0);
-  NodeStruct* nodes = (NodeStruct*) memZCImpl->get_direct_ptr(offset, 0);
-  //NodeStruct* nodes = (NodeStruct*) malloc(sizeof(NodeStruct) * graph->nv);
-  off_t offset2 = memZCImpl->alloc_bytes(sizeof(EdgeStruct) * (colRight - colLeft + 1));
-  assert(offset2 >= 0);
-  EdgeStruct* dsts = (EdgeStruct*) memZCImpl->get_direct_ptr(offset2, 0);
-  //EdgeStruct* dsts = (EdgeStruct*) malloc(sizeof(EdgeStruct) * (colRight - colLeft + 1));
-  E_ID cur = colLeft;
-  for (V_ID n = 0; n < graph->nv; n++) {
-    while ((cur <= colRight ) && (edges[cur - colLeft].src <= n))
-      cur ++;
-    nodes[n].index = cur;
-  }
-  checkCUDA(cudaMemcpy(push_row_ptrs, nodes, sizeof(NodeStruct) * graph->nv,
-                       cudaMemcpyHostToDevice));
-  for (E_ID e = colLeft; e <= colRight; e++)
-    dsts[e - colLeft] = edges[e - colLeft].dst;
-  checkCUDA(cudaMemcpy(push_col_idxs, dsts,
-                       sizeof(EdgeStruct) * (colRight - colLeft + 1),
-                       cudaMemcpyHostToDevice));
-  memZCImpl->free_bytes(offset, sizeof(NodeStruct) * graph->nv);
-  memZCImpl->free_bytes(offset2, sizeof(EdgeStruct) * (colRight - colLeft + 1));
-  //free(nodes);
-  //free(dsts);
+  DegreeType* outDegrees = (DegreeType*) memFBImpl->get_direct_ptr(offset, 0);
+  checkCUDA(cudaMemset(outDegrees, 0, sizeof(DegreeType) * graph->nv));
+  init_push_kernel<<<GET_BLOCKS(colRight - colLeft + 1), CUDA_NUM_THREADS>>>(
+      colLeft, colRight, outDegrees, raw_cols);
+  init_push_row_ptrs<<<GET_BLOCKS(1), CUDA_NUM_THREADS>>>(
+      graph->nv, colLeft, outDegrees, push_row_ptrs);
+  checkCUDA(cudaDeviceSynchronize());
+  checkCUDA(cudaMemset(outDegrees, 0, sizeof(DegreeType) * graph->nv));
+  init_push_col_idxs<<<GET_BLOCKS(rowRight - rowLeft + 1), CUDA_NUM_THREADS>>>(
+      rowLeft, rowRight, colLeft, outDegrees, push_row_ptrs, push_col_idxs, raw_rows, raw_cols);
+  memFBImpl->free_bytes(offset, sizeof(DegreeType) * graph->nv);
+
+  //std::vector<EdgeStruct2> edges(colRight - colLeft + 1);
+  //E_ID startColIdx = colLeft;
+  //for (V_ID n = rowLeft; n <= rowRight; n++) {
+  //  E_ID endColIdx = raw_rows[n - rowLeft];
+  //  for (E_ID e = startColIdx; e < endColIdx; e++) {
+  //    edges[e - colLeft].src = raw_cols[e - colLeft];
+  //    edges[e - colLeft].dst = n;
+  //  }
+  //  startColIdx = endColIdx;
+  //}
+  //std::sort(edges.begin(), edges.end(), compareLess);
+  // Allocate nodes on the same memory as new_pr
+  //std::set<Memory> memZC;
+  //regions[5].get_memories(memZC);
+  //assert(memZC.size() == 1);
+  //assert(memZC.begin()->kind() == Memory::Z_COPY_MEM);
+  //Realm::MemoryImpl* memImpl =
+  //  Realm::get_runtime()->get_memory_impl(*memZC.begin());
+  //Realm::Cuda::GPUZCMemory* memZCImpl = (Realm::Cuda::GPUZCMemory*) memImpl;
+  //off_t offset = memZCImpl->alloc_bytes(sizeof(NodeStruct) * graph->nv);
+  //assert(offset >= 0);
+  //NodeStruct* nodes = (NodeStruct*) memZCImpl->get_direct_ptr(offset, 0);
+  //off_t offset2 = memZCImpl->alloc_bytes(sizeof(EdgeStruct) * (colRight - colLeft + 1));
+  //assert(offset2 >= 0);
+  //EdgeStruct* dsts = (EdgeStruct*) memZCImpl->get_direct_ptr(offset2, 0);
+  //E_ID cur = colLeft;
+  //for (V_ID n = 0; n < graph->nv; n++) {
+  //  while ((cur <= colRight ) && (edges[cur - colLeft].src <= n))
+  //    cur ++;
+  //  nodes[n].index = cur;
+  //}
+  //checkCUDA(cudaMemcpy(push_row_ptrs, nodes, sizeof(NodeStruct) * graph->nv,
+  //                     cudaMemcpyHostToDevice));
+  //for (E_ID e = colLeft; e <= colRight; e++)
+  //  dsts[e - colLeft] = edges[e - colLeft].dst;
+  //checkCUDA(cudaMemcpy(push_col_idxs, dsts,
+  //                     sizeof(EdgeStruct) * (colRight - colLeft + 1),
+  //                     cudaMemcpyHostToDevice));
+  //memZCImpl->free_bytes(offset, sizeof(NodeStruct) * graph->nv);
+  //memZCImpl->free_bytes(offset2, sizeof(EdgeStruct) * (colRight - colLeft + 1));
   FrontierHeader* header = (FrontierHeader*) frontier;
   header->type = FrontierHeader::DENSE_BITMAP;
   header->numNodes = rowRight - rowLeft + 1;
@@ -670,12 +741,6 @@ GraphPiece push_init_task_impl(const Task *task,
   piece.nv = graph->nv;
   piece.ne = graph->ne;
   // Allocate oldPrFb/newPrFb on the same memory as row_ptr
-  std::set<Memory> memFB;
-  regions[0].get_memories(memFB);
-  assert(memFB.size() == 1);
-  assert(memFB.begin()->kind() == Memory::GPU_FB_MEM);
-  memImpl = Realm::get_runtime()->get_memory_impl(*memFB.begin());
-  Realm::Cuda::GPUFBMemory* memFBImpl = (Realm::Cuda::GPUFBMemory*) memImpl;
   offset = memFBImpl->alloc_bytes(sizeof(Vertex) * (rowRight - rowLeft + 1));
   assert(offset >= 0);
   piece.oldPrFb = (Vertex*) memFBImpl->get_direct_ptr(offset, 0);
@@ -720,7 +785,7 @@ void check_kernel(V_ID rowLeft,
       startColIdx = pull_row_ptrs[n - 1].index;
     for (E_ID e = startColIdx; e < endColIdx; e++) {
       V_ID srcVtx = pull_col_idxs[e - colLeft].src;
-      if (labels[dstVtx] > labels[srcVtx])
+      if (labels[dstVtx] < labels[srcVtx])
         atomicAdd(numMistakes, 1);
     }
   }
@@ -767,6 +832,6 @@ void check_task_impl(const Task *task,
     printf("[PASS] Check task: rowLeft(%u) numMistakes(%u)\n",
            rowLeft, *numMistakes);
   else
-    printf("[FAIL] Check task: rowLeft(%u) numMistakes(%u)\n ",
+    printf("[FAIL] Check task: rowLeft(%u) numMistakes(%u)\n",
            rowLeft, *numMistakes);
 }
