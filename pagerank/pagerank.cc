@@ -26,19 +26,21 @@
 LegionRuntime::Logger::Category log_pr("pagerank");
 
 void parse_input_args(char **argv, int argc, int &num_gpu,
-                      int &num_iter, std::string &file_name);
+                      int &num_iter, std::string &file_name,
+                      bool &verbose);
 
 void top_level_task(const Task *task, const std::vector<PhysicalRegion> &regions,
                     Context ctx, HighLevelRuntime *runtime)
 {
   int numGPU = 0, numIter = 0;
   std::string filename;
+  bool verbose = false;
   // parse input arguments
   {
     const InputArgs &command_args = HighLevelRuntime::get_input_args();
     char **argv = command_args.argv;
     int argc = command_args.argc;
-    parse_input_args(argv, argc, numGPU, numIter, filename);
+    parse_input_args(argv, argc, numGPU, numIter, filename, verbose);
     log_pr.print("PageRank settings: numPartitions(%d) numIter(%d)" 
                  " filename = %s", numGPU, numIter, filename.c_str());
     if ((numGPU <= 0) || (numIter <= 0)) {
@@ -117,7 +119,8 @@ void top_level_task(const Task *task, const std::vector<PhysicalRegion> &regions
 }
 
 void parse_input_args(char **argv, int argc,
-                      int &numGPU, int &numIter, std::string &filename)
+                      int &numGPU, int &numIter,
+                      std::string &filename, bool &verbose)
 {
   for (int i = 1; i < argc; i++) 
   {
@@ -134,6 +137,11 @@ void parse_input_args(char **argv, int argc,
     if (!strcmp(argv[i], "-file"))
     {
       filename = std::string(argv[++i]);
+      continue;
+    }
+    if ((!strcmp(argv[i], "-verbose")) || (!strcmp(argv[i], "-v")))
+    {
+      verbose = true;
       continue;
     }
   }
