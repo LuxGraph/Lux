@@ -82,6 +82,7 @@ public:
   LogicalPartition frontier_lp[2];
   LogicalRegion dist_lr[2];
   LogicalPartition dist_lp[2];
+  V_ID startVtx; // For SSSP
   bool verbose;
 };
 
